@@ -16,7 +16,6 @@ import static org.hamcrest.CoreMatchers.*;
 import static org.hamcrest.MatcherAssert.assertThat;
 
 class HnswIndexTest {
-
     private HnswIndex<String, float[], knn.TestItem, Float> index;
 
     private int maxItemCount = 100;
@@ -185,6 +184,18 @@ class HnswIndexTest {
         index.addAll(Arrays.asList(item1, item2, item3));
 
         List<SearchResult<TestItem, Float>> nearest = index.findNeighbors(item1.id(), 10);
+
+        assertThat(nearest, is(Arrays.asList(
+                SearchResult.create(item3, 0.06521261f),
+                SearchResult.create(item2, 0.11621308f)
+        )));
+    }
+
+        @Test
+    void findReverseNeighbors() throws InterruptedException {
+        index.addAll(Arrays.asList(item1, item2, item3));
+
+        List<SearchResult<TestItem, Float>> nearest = index.findReverseNeighbors(item1.id(), 10);
 
         assertThat(nearest, is(Arrays.asList(
                 SearchResult.create(item3, 0.06521261f),

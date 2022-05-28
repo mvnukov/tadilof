@@ -30,8 +30,8 @@ import java.util.concurrent.locks.ReentrantLock;
  * @see <a href="https://arxiv.org/abs/1603.09320">
  * Efficient and robust approximate nearest neighbor search using Hierarchical Navigable Small World graphs</a>
  */
-public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance>
-        implements Index<TId, TVector, TItem, TDistance> {
+public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance> implements Index<TId, TVector,
+        TItem, TDistance> {
 
     private static final byte VERSION_1 = 0x01;
 
@@ -100,8 +100,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
 
         this.globalLock = new ReentrantLock();
 
-        this.visitedBitSetPool = new GenericObjectPool<>(() -> new ArrayBitSet(this.maxItemCount),
-                Runtime.getRuntime().availableProcessors());
+        this.visitedBitSetPool = new GenericObjectPool<>(() -> new ArrayBitSet(this.maxItemCount), Runtime.getRuntime().availableProcessors());
 
         this.excludedCandidates = new SynchronizedBitSet(new ArrayBitSet(this.maxItemCount));
 
@@ -151,7 +150,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
 
             Iterator<TItem> iter = new ItemIterator();
 
-            while(iter.hasNext()) {
+            while (iter.hasNext()) {
                 results.add(iter.next());
             }
 
@@ -294,10 +293,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
 
                                                 Node<TItem> candidateNode = nodes.get(candidateId);
 
-                                                TDistance candidateDistance = distanceFunction.distance(
-                                                        item.vector(),
-                                                        candidateNode.item.vector()
-                                                );
+                                                TDistance candidateDistance = distanceFunction.distance(item.vector(), candidateNode.item.vector());
 
                                                 if (lt(candidateDistance, curDist)) {
                                                     curDist = candidateDistance;
@@ -311,8 +307,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
                             }
 
                             for (int level = Math.min(randomLevel, entryPointCopy.maxLevel()); level >= 0; level--) {
-                                PriorityQueue<NodeIdAndDistance<TDistance>> topCandidates =
-                                        searchBaseLayer(currObj, item.vector(), efConstruction, level);
+                                PriorityQueue<NodeIdAndDistance<TDistance>> topCandidates = searchBaseLayer(currObj, item.vector(), efConstruction, level);
 
                                 if (entryPointCopy.deleted) {
                                     TDistance distance = distanceFunction.distance(item.vector(), entryPointCopy.item.vector());
@@ -348,9 +343,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
         }
     }
 
-    private void mutuallyConnectNewElement(Node<TItem> newNode,
-                                           PriorityQueue<NodeIdAndDistance<TDistance>> topCandidates,
-                                           int level) {
+    private void mutuallyConnectNewElement(Node<TItem> newNode, PriorityQueue<NodeIdAndDistance<TDistance>> topCandidates, int level) {
 
         int bestN = level == 0 ? this.maxM0 : this.maxM;
 
@@ -382,22 +375,15 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
                 } else {
                     // finding the "weakest" element to replace it with the new one
 
-                    TDistance dMax = distanceFunction.distance(
-                            newItemVector,
-                            neighbourNode.item.vector()
-                    );
+                    TDistance dMax = distanceFunction.distance(newItemVector, neighbourNode.item.vector());
 
-                    Comparator<NodeIdAndDistance<TDistance>> comparator = Comparator
-                            .<NodeIdAndDistance<TDistance>>naturalOrder().reversed();
+                    Comparator<NodeIdAndDistance<TDistance>> comparator = Comparator.<NodeIdAndDistance<TDistance>>naturalOrder().reversed();
 
                     PriorityQueue<NodeIdAndDistance<TDistance>> candidates = new PriorityQueue<>(comparator);
                     candidates.add(new NodeIdAndDistance<>(newNodeId, dMax, maxValueDistanceComparator));
 
                     neighbourConnectionsAtLevel.forEach(id -> {
-                        TDistance dist = distanceFunction.distance(
-                                neighbourVector,
-                                nodes.get(id).item.vector()
-                        );
+                        TDistance dist = distanceFunction.distance(neighbourVector, nodes.get(id).item.vector());
 
                         candidates.add(new NodeIdAndDistance<>(id, dist, maxValueDistanceComparator));
                     });
@@ -423,11 +409,11 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
         PriorityQueue<NodeIdAndDistance<TDistance>> queueClosest = new PriorityQueue<>();
         List<NodeIdAndDistance<TDistance>> returnList = new ArrayList<>();
 
-        while(!topCandidates.isEmpty()) {
+        while (!topCandidates.isEmpty()) {
             queueClosest.add(topCandidates.poll());
         }
 
-        while(!queueClosest.isEmpty()) {
+        while (!queueClosest.isEmpty()) {
             if (returnList.size() >= m) {
                 break;
             }
@@ -439,10 +425,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
             boolean good = true;
             for (NodeIdAndDistance<TDistance> secondPair : returnList) {
 
-                TDistance curdist = distanceFunction.distance(
-                        nodes.get(secondPair.nodeId).item.vector(),
-                        nodes.get(currentPair.nodeId).item.vector()
-                );
+                TDistance curdist = distanceFunction.distance(nodes.get(secondPair.nodeId).item.vector(), nodes.get(currentPair.nodeId).item.vector());
 
                 if (lt(curdist, distToQuery)) {
                     good = false;
@@ -458,6 +441,10 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
         topCandidates.addAll(returnList);
     }
 
+    @Override
+    public List<SearchResult<TItem, TDistance>> findReverseNearest(TVector vector, int k) {
+
+    }
     /**
      * {@inheritDoc}
      */
@@ -488,10 +475,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
 
                         int candidateId = candidateConnections.get(i);
 
-                        TDistance candidateDistance = distanceFunction.distance(
-                                destination,
-                                nodes.get(candidateId).item.vector()
-                        );
+                        TDistance candidateDistance = distanceFunction.distance(destination, nodes.get(candidateId).item.vector());
                         if (lt(candidateDistance, curDist)) {
                             curDist = candidateDistance;
                             currObj = nodes.get(candidateId);
@@ -503,8 +487,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
             }
         }
 
-        PriorityQueue<NodeIdAndDistance<TDistance>> topCandidates = searchBaseLayer(
-                currObj, destination, Math.max(ef, k), 0);
+        PriorityQueue<NodeIdAndDistance<TDistance>> topCandidates = searchBaseLayer(currObj, destination, Math.max(ef, k), 0);
 
         while (topCandidates.size() > k) {
             topCandidates.poll();
@@ -519,14 +502,12 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
         return results;
     }
 
-    private PriorityQueue<NodeIdAndDistance<TDistance>> searchBaseLayer(
-            Node<TItem> entryPointNode, TVector destination, int k, int layer) {
+    private PriorityQueue<NodeIdAndDistance<TDistance>> searchBaseLayer(Node<TItem> entryPointNode, TVector destination, int k, int layer) {
 
         BitSet visitedBitSet = visitedBitSetPool.borrowObject();
 
         try {
-            PriorityQueue<NodeIdAndDistance<TDistance>> topCandidates =
-                    new PriorityQueue<>(Comparator.<NodeIdAndDistance<TDistance>>naturalOrder().reversed());
+            PriorityQueue<NodeIdAndDistance<TDistance>> topCandidates = new PriorityQueue<>(Comparator.<NodeIdAndDistance<TDistance>>naturalOrder().reversed());
             PriorityQueue<NodeIdAndDistance<TDistance>> candidateSet = new PriorityQueue<>();
 
             TDistance lowerBound;
@@ -571,13 +552,11 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
 
                             Node<TItem> candidateNode = nodes.get(candidateId);
 
-                            TDistance candidateDistance = distanceFunction.distance(destination,
-                                    candidateNode.item.vector());
+                            TDistance candidateDistance = distanceFunction.distance(destination, candidateNode.item.vector());
 
                             if (topCandidates.size() < k || gt(lowerBound, candidateDistance)) {
 
-                                NodeIdAndDistance<TDistance> candidatePair =
-                                        new NodeIdAndDistance<>(candidateId, candidateDistance, maxValueDistanceComparator);
+                                NodeIdAndDistance<TDistance> candidatePair = new NodeIdAndDistance<>(candidateId, candidateDistance, maxValueDistanceComparator);
 
                                 candidateSet.add(candidatePair);
 
@@ -776,8 +755,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
         this.entryPoint = entrypointNodeId == -1 ? null : nodes.get(entrypointNodeId);
 
         this.globalLock = new ReentrantLock();
-        this.visitedBitSetPool = new GenericObjectPool<>(() -> new ArrayBitSet(this.maxItemCount),
-                Runtime.getRuntime().availableProcessors());
+        this.visitedBitSetPool = new GenericObjectPool<>(() -> new ArrayBitSet(this.maxItemCount), Runtime.getRuntime().availableProcessors());
         this.excludedCandidates = new SynchronizedBitSet(new ArrayBitSet(this.maxItemCount));
         this.locks = new HashMap<>();
         this.exactView = new ExactView();
@@ -837,8 +815,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
      * @return The restored index
      * @throws IOException in case of an I/O exception
      */
-    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> HnswIndex<TId, TVector, TItem, TDistance> load(File file)
-            throws IOException {
+    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> HnswIndex<TId, TVector, TItem, TDistance> load(File file) throws IOException {
         return load(new FileInputStream(file));
     }
 
@@ -854,8 +831,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
      * @return The restored index
      * @throws IOException in case of an I/O exception
      */
-    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> HnswIndex<TId, TVector, TItem, TDistance> load(File file, ClassLoader classLoader)
-            throws IOException {
+    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> HnswIndex<TId, TVector, TItem, TDistance> load(File file, ClassLoader classLoader) throws IOException {
         return load(new FileInputStream(file), classLoader);
     }
 
@@ -870,8 +846,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
      * @return The restored index
      * @throws IOException in case of an I/O exception
      */
-    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> HnswIndex<TId, TVector, TItem, TDistance> load(Path path)
-            throws IOException {
+    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> HnswIndex<TId, TVector, TItem, TDistance> load(Path path) throws IOException {
         return load(Files.newInputStream(path));
     }
 
@@ -884,12 +859,10 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
      * @param <TVector>   Type of the vector to perform distance calculation on
      * @param <TItem>     Type of items stored in the index
      * @param <TDistance> Type of distance between items (expect any numeric type: float, double, int, ..)
-     *
      * @return The restored index
      * @throws IOException in case of an I/O exception
      */
-    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> HnswIndex<TId, TVector, TItem, TDistance> load(Path path, ClassLoader classLoader)
-            throws IOException {
+    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> HnswIndex<TId, TVector, TItem, TDistance> load(Path path, ClassLoader classLoader) throws IOException {
         return load(Files.newInputStream(path), classLoader);
     }
 
@@ -905,8 +878,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
      * @throws IOException              in case of an I/O exception
      * @throws IllegalArgumentException in case the file cannot be read
      */
-    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> HnswIndex<TId, TVector, TItem, TDistance> load(InputStream inputStream)
-            throws IOException {
+    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> HnswIndex<TId, TVector, TItem, TDistance> load(InputStream inputStream) throws IOException {
         return load(inputStream, Thread.currentThread().getContextClassLoader());
     }
 
@@ -924,10 +896,9 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
      * @throws IllegalArgumentException in case the file cannot be read
      */
     @SuppressWarnings("unchecked")
-    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> HnswIndex<TId, TVector, TItem, TDistance> load(InputStream inputStream, ClassLoader classLoader)
-            throws IOException {
+    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> HnswIndex<TId, TVector, TItem, TDistance> load(InputStream inputStream, ClassLoader classLoader) throws IOException {
 
-        try(ObjectInputStream ois = new ClassLoaderObjectInputStream(classLoader, inputStream)) {
+        try (ObjectInputStream ois = new ClassLoaderObjectInputStream(classLoader, inputStream)) {
             return (HnswIndex<TId, TVector, TItem, TDistance>) ois.readObject();
         } catch (ClassNotFoundException e) {
             throw new IllegalArgumentException("Could not read input file.", e);
@@ -946,10 +917,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
         return list;
     }
 
-    private static <TItem> Node<TItem> readNode(ObjectInputStream ois,
-                                                ObjectSerializer<TItem> itemSerializer,
-                                                int maxM0,
-                                                int maxM) throws IOException, ClassNotFoundException {
+    private static <TItem> Node<TItem> readNode(ObjectInputStream ois, ObjectSerializer<TItem> itemSerializer, int maxM0, int maxM) throws IOException, ClassNotFoundException {
 
         int id = ois.readInt();
 
@@ -973,11 +941,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
         }
     }
 
-    private static <TItem> AtomicReferenceArray<Node<TItem>> readNodesArray(ObjectInputStream ois,
-                                                                            ObjectSerializer<TItem> itemSerializer,
-                                                                            int maxM0,
-                                                                            int maxM)
-            throws IOException, ClassNotFoundException {
+    private static <TItem> AtomicReferenceArray<Node<TItem>> readNodesArray(ObjectInputStream ois, ObjectSerializer<TItem> itemSerializer, int maxM0, int maxM) throws IOException, ClassNotFoundException {
 
         int size = ois.readInt();
         AtomicReferenceArray<Node<TItem>> nodes = new AtomicReferenceArray<>(size);
@@ -989,9 +953,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
         return nodes;
     }
 
-    private static <TId> MutableObjectIntMap<TId> readMutableObjectIntMap(ObjectInputStream ois,
-                                                                          ObjectSerializer<TId> itemIdSerializer)
-            throws IOException, ClassNotFoundException {
+    private static <TId> MutableObjectIntMap<TId> readMutableObjectIntMap(ObjectInputStream ois, ObjectSerializer<TId> itemIdSerializer) throws IOException, ClassNotFoundException {
 
         int size = ois.readInt();
 
@@ -1006,9 +968,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
         return map;
     }
 
-    private static <TId> MutableObjectLongMap<TId> readMutableObjectLongMap(ObjectInputStream ois,
-                                                                            ObjectSerializer<TId> itemIdSerializer)
-            throws IOException, ClassNotFoundException {
+    private static <TId> MutableObjectLongMap<TId> readMutableObjectLongMap(ObjectInputStream ois, ObjectSerializer<TId> itemIdSerializer) throws IOException, ClassNotFoundException {
 
         int size = ois.readInt();
 
@@ -1026,17 +986,14 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
     /**
      * Start the process of building a new HNSW index.
      *
-     * @param dimensions the dimensionality of the vectors stored in the index
+     * @param dimensions       the dimensionality of the vectors stored in the index
      * @param distanceFunction the distance function
-     * @param maxItemCount maximum number of items the index can hold
-     * @param <TVector> Type of the vector to perform distance calculation on
-     * @param <TDistance> Type of distance between items (expect any numeric type: float, double, int, ..)
+     * @param maxItemCount     maximum number of items the index can hold
+     * @param <TVector>        Type of the vector to perform distance calculation on
+     * @param <TDistance>      Type of distance between items (expect any numeric type: float, double, int, ..)
      * @return a builder
      */
-    public static <TVector, TDistance extends Comparable<TDistance>> Builder<TVector, TDistance> newBuilder(
-            int dimensions,
-            DistanceFunction<TVector, TDistance> distanceFunction,
-            int maxItemCount) {
+    public static <TVector, TDistance extends Comparable<TDistance>> Builder<TVector, TDistance> newBuilder(int dimensions, DistanceFunction<TVector, TDistance> distanceFunction, int maxItemCount) {
 
         Comparator<TDistance> distanceComparator = Comparator.naturalOrder();
 
@@ -1046,19 +1003,15 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
     /**
      * Start the process of building a new HNSW index.
      *
-     * @param dimensions the dimensionality of the vectors stored in the index
-     * @param distanceFunction the distance function
+     * @param dimensions         the dimensionality of the vectors stored in the index
+     * @param distanceFunction   the distance function
      * @param distanceComparator used to compare distances
-     * @param maxItemCount maximum number of items the index can hold
-     * @param <TVector> Type of the vector to perform distance calculation on
-     * @param <TDistance> Type of distance between items (expect any numeric type: float, double, int, ..)
+     * @param maxItemCount       maximum number of items the index can hold
+     * @param <TVector>          Type of the vector to perform distance calculation on
+     * @param <TDistance>        Type of distance between items (expect any numeric type: float, double, int, ..)
      * @return a builder
      */
-    public static <TVector, TDistance> Builder<TVector, TDistance> newBuilder(
-            int dimensions,
-            DistanceFunction<TVector, TDistance> distanceFunction,
-            Comparator<TDistance> distanceComparator,
-            int maxItemCount) {
+    public static <TVector, TDistance> Builder<TVector, TDistance> newBuilder(int dimensions, DistanceFunction<TVector, TDistance> distanceFunction, Comparator<TDistance> distanceComparator, int maxItemCount) {
 
         return new Builder<>(dimensions, distanceFunction, distanceComparator, maxItemCount);
     }
@@ -1070,12 +1023,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
 
         int hashCode = value.hashCode();
 
-        byte[] bytes = new byte[]{
-                (byte) (hashCode >> 24),
-                (byte) (hashCode >> 16),
-                (byte) (hashCode >> 8),
-                (byte) hashCode
-        };
+        byte[] bytes = new byte[]{(byte) (hashCode >> 24), (byte) (hashCode >> 16), (byte) (hashCode >> 8), (byte) hashCode};
 
         double random = Math.abs((double) Murmur3.hash32(bytes) / (double) Integer.MAX_VALUE);
 
@@ -1114,9 +1062,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
         @Override
         public List<SearchResult<TItem, TDistance>> findNearest(TVector vector, int k) {
 
-            Comparator<SearchResult<TItem, TDistance>> comparator = Comparator
-                    .<SearchResult<TItem, TDistance>>naturalOrder()
-                    .reversed();
+            Comparator<SearchResult<TItem, TDistance>> comparator = Comparator.<SearchResult<TItem, TDistance>>naturalOrder().reversed();
 
             PriorityQueue<SearchResult<TItem, TDistance>> queue = new PriorityQueue<>(k, comparator);
 
@@ -1203,7 +1149,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
 
             do {
                 node = HnswIndex.this.nodes.get(index++);
-            } while(node == null || node.deleted);
+            } while (node == null || node.deleted);
 
             done++;
 
@@ -1254,7 +1200,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
     }
 
 
-    static class MaxValueComparator<TDistance> implements Comparator<TDistance>, Serializable  {
+    static class MaxValueComparator<TDistance> implements Comparator<TDistance>, Serializable {
 
         private static final long serialVersionUID = 1L;
 
@@ -1266,8 +1212,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
 
         @Override
         public int compare(TDistance o1, TDistance o2) {
-            return o1 == null ? o2 == null ? 0 : 1
-                    : o2 == null ? -1 : delegate.compare(o1, o2);
+            return o1 == null ? o2 == null ? 0 : 1 : o2 == null ? -1 : delegate.compare(o1, o2);
         }
 
         static <TDistance> TDistance maxValue() {
@@ -1278,8 +1223,8 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
     /**
      * Base class for HNSW index builders.
      *
-     * @param <TBuilder> Concrete class that extends from this builder
-     * @param <TVector> Type of the vector to perform distance calculation on
+     * @param <TBuilder>  Concrete class that extends from this builder
+     * @param <TVector>   Type of the vector to perform distance calculation on
      * @param <TDistance> Type of items stored in the index
      */
     public static abstract class BuilderBase<TBuilder extends BuilderBase<TBuilder, TVector, TDistance>, TVector, TDistance> {
@@ -1300,10 +1245,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
         int efConstruction = DEFAULT_EF_CONSTRUCTION;
         boolean removeEnabled = DEFAULT_REMOVE_ENABLED;
 
-        BuilderBase(int dimensions,
-                    DistanceFunction<TVector, TDistance> distanceFunction,
-                    Comparator<TDistance> distanceComparator,
-                    int maxItemCount) {
+        BuilderBase(int dimensions, DistanceFunction<TVector, TDistance> distanceFunction, Comparator<TDistance> distanceComparator, int maxItemCount) {
 
             this.dimensions = dimensions;
             this.distanceFunction = distanceFunction;
@@ -1384,14 +1326,11 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
         /**
          * Constructs a new {@link Builder} instance.
          *
-         * @param dimensions the dimensionality of the vectors stored in the index
+         * @param dimensions       the dimensionality of the vectors stored in the index
          * @param distanceFunction the distance function
          * @param maxItemCount     the maximum number of elements in the index
          */
-        Builder(int dimensions,
-                DistanceFunction<TVector, TDistance> distanceFunction,
-                Comparator<TDistance> distanceComparator,
-                int maxItemCount) {
+        Builder(int dimensions, DistanceFunction<TVector, TDistance> distanceFunction, Comparator<TDistance> distanceComparator, int maxItemCount) {
 
             super(dimensions, distanceFunction, distanceComparator, maxItemCount);
         }
@@ -1410,9 +1349,10 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
          * @param <TItem>          implementation of the Item interface
          * @return the builder
          */
-        public <TId, TItem extends Item<TId, TVector>> RefinedBuilder<TId, TVector, TItem, TDistance> withCustomSerializers(ObjectSerializer<TId> itemIdSerializer, ObjectSerializer<TItem> itemSerializer) {
-            return new RefinedBuilder<>(dimensions, distanceFunction, distanceComparator, maxItemCount, m, ef, efConstruction,
-                    removeEnabled, itemIdSerializer, itemSerializer);
+        public <TId, TItem extends Item<TId, TVector>> RefinedBuilder<TId, TVector, TItem, TDistance>
+        withCustomSerializers(ObjectSerializer<TId> itemIdSerializer, ObjectSerializer<TItem> itemSerializer) {
+            return new RefinedBuilder<>(dimensions, distanceFunction, distanceComparator, maxItemCount, m, ef,
+                    efConstruction, removeEnabled, itemIdSerializer, itemSerializer);
         }
 
         /**
@@ -1426,8 +1366,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
             ObjectSerializer<TId> itemIdSerializer = new JavaObjectSerializer<>();
             ObjectSerializer<TItem> itemSerializer = new JavaObjectSerializer<>();
 
-            return withCustomSerializers(itemIdSerializer, itemSerializer)
-                    .build();
+            return withCustomSerializers(itemIdSerializer, itemSerializer).build();
         }
 
     }
@@ -1435,27 +1374,17 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
     /**
      * Extension of {@link Builder} that has knows what type of item is going to be stored in the index.
      *
-     * @param <TId> Type of the external identifier of an item
-     * @param <TVector> Type of the vector to perform distance calculation on
-     * @param <TItem> Type of items stored in the index
+     * @param <TId>       Type of the external identifier of an item
+     * @param <TVector>   Type of the vector to perform distance calculation on
+     * @param <TItem>     Type of items stored in the index
      * @param <TDistance> Type of distance between items (expect any numeric type: float, double, int, ..)
      */
-    public static class RefinedBuilder<TId, TVector, TItem extends Item<TId, TVector>, TDistance>
-            extends BuilderBase<RefinedBuilder<TId, TVector, TItem, TDistance>, TVector, TDistance> {
+    public static class RefinedBuilder<TId, TVector, TItem extends Item<TId, TVector>, TDistance> extends BuilderBase<RefinedBuilder<TId, TVector, TItem, TDistance>, TVector, TDistance> {
 
         private ObjectSerializer<TId> itemIdSerializer;
         private ObjectSerializer<TItem> itemSerializer;
 
-        RefinedBuilder(int dimensions,
-                       DistanceFunction<TVector, TDistance> distanceFunction,
-                       Comparator<TDistance> distanceComparator,
-                       int maxItemCount,
-                       int m,
-                       int ef,
-                       int efConstruction,
-                       boolean removeEnabled,
-                       ObjectSerializer<TId> itemIdSerializer,
-                       ObjectSerializer<TItem> itemSerializer) {
+        RefinedBuilder(int dimensions, DistanceFunction<TVector, TDistance> distanceFunction, Comparator<TDistance> distanceComparator, int maxItemCount, int m, int ef, int efConstruction, boolean removeEnabled, ObjectSerializer<TId> itemIdSerializer, ObjectSerializer<TItem> itemSerializer) {
 
             super(dimensions, distanceFunction, distanceComparator, maxItemCount);
 
@@ -1480,8 +1409,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
          * @param itemSerializer   serializes the
          * @return the builder
          */
-        public RefinedBuilder<TId, TVector, TItem, TDistance> withCustomSerializers(
-                ObjectSerializer<TId> itemIdSerializer, ObjectSerializer<TItem> itemSerializer) {
+        public RefinedBuilder<TId, TVector, TItem, TDistance> withCustomSerializers(ObjectSerializer<TId> itemIdSerializer, ObjectSerializer<TItem> itemSerializer) {
 
             this.itemIdSerializer = itemIdSerializer;
             this.itemSerializer = itemSerializer;
@@ -1494,7 +1422,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
          *
          * @return the hnsw index instance
          */
-        public HnswIndex<String, float[], TItem, Float> build() {
+        public HnswIndex<TId, TVector, TItem, TDistance> build() {
             return new HnswIndex<>(this);
         }
 
