@@ -3,6 +3,7 @@ package knn.hnsw;
 import knn.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import smile.read;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -11,6 +12,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.hamcrest.CoreMatchers.*;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -18,10 +20,10 @@ import static org.hamcrest.MatcherAssert.assertThat;
 class HnswIndexTest {
     private HnswIndex<String, float[], knn.TestItem, Float> index;
 
-    private int maxItemCount = 100;
+    private int maxItemCount = 300;
     private int m = 12;
     private int efConstruction = 250;
-    private int ef = 20;
+    private int ef = 10;
     private int dimensions = 2;
     private DistanceFunction<float[], Float> distanceFunction = DistanceFunctions.FLOAT_COSINE_DISTANCE;
     private ObjectSerializer<String> itemIdSerializer = new JavaObjectSerializer<>();
@@ -181,9 +183,13 @@ class HnswIndexTest {
 
     @Test
     void findNeighbors() throws InterruptedException {
-        index.addAll(Arrays.asList(item1, item2, item3));
+        var dots = read.INSTANCE.csv("src/main/resources/dots", ',', false, '"', '\\', null);
+        AtomicInteger i = new AtomicInteger();
+        dots.stream().forEach(tuple -> {
+            index.add(new TestItem(String.valueOf(i.incrementAndGet()), toFloats(tuple.toArray())));
+        });
 
-        List<SearchResult<TestItem, Float>> nearest = index.findNeighbors(item1.id(), 10);
+        List<SearchResult<TestItem, Float>> nearest = index.findNeighbors("1", 10);
 
         assertThat(nearest, is(Arrays.asList(
                 SearchResult.create(item3, 0.06521261f),
@@ -191,7 +197,15 @@ class HnswIndexTest {
         )));
     }
 
-        @Test
+    private float[] toFloats(double[] doubles) {
+        float[] floats = new float[doubles.length];
+        for (int i = 0; i < doubles.length; i++) {
+            floats[i] = (float)doubles[i];
+        }
+        return floats;
+    }
+
+    @Test
     void findReverseNeighbors() throws InterruptedException {
         index.addAll(Arrays.asList(item1, item2, item3));
 

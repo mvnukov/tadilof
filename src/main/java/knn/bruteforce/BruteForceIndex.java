@@ -156,6 +156,11 @@ public class BruteForceIndex<TId, TVector, TItem extends Item<TId, TVector>, TDi
         return results;
     }
 
+    @Override
+    public List<SearchResult<TItem, TDistance>> findReverseNearest(TVector tVector, int k) {
+        return null;
+    }
+
     /**
      * {@inheritDoc}
      */

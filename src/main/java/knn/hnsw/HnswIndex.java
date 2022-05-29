@@ -443,7 +443,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
 
     @Override
     public List<SearchResult<TItem, TDistance>> findReverseNearest(TVector vector, int k) {
-
+        return null;
     }
     /**
      * {@inheritDoc}
@@ -1090,6 +1090,21 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance
             }
 
             return results;
+        }
+
+        @Override
+        public List<SearchResult<TItem, TDistance>> findReverseNearest(TVector tVector, int k) {
+            return null;
+        }
+
+        @Override
+        public List<SearchResult<TItem, TDistance>> findNeighbors(TId tId, int k) {
+            return Index.super.findNeighbors(tId, k);
+        }
+
+        @Override
+        public List<SearchResult<TItem, TDistance>> findReverseNeighbors(TId tId, int k) {
+            return Index.super.findReverseNeighbors(tId, k);
         }
 
         @Override
