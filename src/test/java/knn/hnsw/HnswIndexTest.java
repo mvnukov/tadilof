@@ -25,13 +25,13 @@ class HnswIndexTest {
     private int efConstruction = 250;
     private int ef = 10;
     private int dimensions = 2;
-    private DistanceFunction<float[], Float> distanceFunction = DistanceFunctions.FLOAT_COSINE_DISTANCE;
+    private DistanceFunction<float[], Float> distanceFunction = DistanceFunctions.FLOAT_MANHATTAN_DISTANCE;
     private ObjectSerializer<String> itemIdSerializer = new JavaObjectSerializer<>();
     private ObjectSerializer<TestItem> itemSerializer = new JavaObjectSerializer<>();
 
-    private TestItem item1 = new TestItem("1", new float[] { 0.0110f, 0.2341f }, 10);
-    private TestItem item2 = new TestItem("2", new float[] { 0.2300f, 0.3891f }, 10);
-    private TestItem item3 = new TestItem("3", new float[] { 0.4300f, 0.9891f }, 10);
+    private TestItem item1 = new TestItem("1", new float[]{0.0110f, 0.2341f}, 10);
+    private TestItem item2 = new TestItem("2", new float[]{0.2300f, 0.3891f}, 10);
+    private TestItem item3 = new TestItem("3", new float[]{0.4300f, 0.9891f}, 10);
 
     @BeforeEach
     void setUp() {
@@ -80,14 +80,18 @@ class HnswIndexTest {
 
     @Test
     void returnDistanceFunction() {
-        assertThat(index.getDistanceFunction(), is(sameInstance(distanceFunction)));
+        assertThat(index.geDistanceFunction(), is(sameInstance(distanceFunction)));
     }
 
     @Test
-    void returnsItemIdSerializer() { assertThat(index.getItemIdSerializer(), is(sameInstance(itemIdSerializer))); }
+    void returnsItemIdSerializer() {
+        assertThat(index.getItemIdSerializer(), is(sameInstance(itemIdSerializer)));
+    }
 
     @Test
-    void returnsItemSerializer() { assertThat(index.getItemSerializer(), is(sameInstance(itemSerializer))); }
+    void returnsItemSerializer() {
+        assertThat(index.getItemSerializer(), is(sameInstance(itemSerializer)));
+    }
 
     @Test
     void returnsSize() {
@@ -135,7 +139,7 @@ class HnswIndexTest {
 
     @Test
     void addNewerItem() {
-        TestItem newerItem = new TestItem(item1.id(), new float[] { 0.f, 0.f }, item1.version() + 1);
+        TestItem newerItem = new TestItem(item1.id(), new float[]{0.f, 0.f}, item1.version() + 1);
 
         index.add(item1);
         index.add(newerItem);
@@ -146,7 +150,7 @@ class HnswIndexTest {
 
     @Test
     void addOlderItem() {
-        TestItem olderItem = new TestItem(item1.id(), new float[] { 0.f, 0.f }, item1.version() - 1);
+        TestItem olderItem = new TestItem(item1.id(), new float[]{0.f, 0.f}, item1.version() - 1);
 
         index.add(item1);
         index.add(olderItem);
@@ -183,24 +187,31 @@ class HnswIndexTest {
 
     @Test
     void findNeighbors() throws InterruptedException {
-        var dots = read.INSTANCE.csv("src/main/resources/dots", ',', false, '"', '\\', null);
+        HnswIndex<String, float[], knn.TestItem, Float> index = (HnswIndex<String, float[], knn.TestItem, Float>) HnswIndex
+                .newBuilder(37, distanceFunction, 64000)
+                .withCustomSerializers(itemIdSerializer, itemSerializer)
+                .withM(m)
+                .withEfConstruction(efConstruction)
+                .withEf(ef)
+                .withRemoveEnabled()
+                .build();
+
+        var dots = read.INSTANCE.csv("src/main/resources/kddcup.http.data_10_percent_corrected", ',', false, '"', '\\', null);
         AtomicInteger i = new AtomicInteger();
         dots.stream().forEach(tuple -> {
             index.add(new TestItem(String.valueOf(i.incrementAndGet()), toFloats(tuple.toArray())));
         });
 
         List<SearchResult<TestItem, Float>> nearest = index.findNeighbors("1", 10);
+        List<SearchResult<TestItem, Float>> nearestExact = index.asExactIndex().findNeighbors("1", 10);
 
-        assertThat(nearest, is(Arrays.asList(
-                SearchResult.create(item3, 0.06521261f),
-                SearchResult.create(item2, 0.11621308f)
-        )));
+        assertThat(nearest, is(nearestExact));
     }
 
     private float[] toFloats(double[] doubles) {
         float[] floats = new float[doubles.length];
         for (int i = 0; i < doubles.length; i++) {
-            floats[i] = (float)doubles[i];
+            floats[i] = (float) doubles[i];
         }
         return floats;
     }
