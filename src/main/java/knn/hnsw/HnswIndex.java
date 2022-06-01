@@ -1399,7 +1399,8 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
      * @param <TItem>     Type of items stored in the index
      * @param <Distance> Type of distance between items (expect any numeric type: float, double, int, ..)
      */
-    public static class RefinedBuilder<TId, TVector, TItem extends Item<TId, TVector>, Distance> extends BuilderBase<RefinedBuilder<TId, TVector, TItem, Distance>, TVector, Distance> {
+    public static class RefinedBuilder<TId, TVector, TItem extends Item<TId, TVector>, Distance> extends
+            BuilderBase<RefinedBuilder<TId, TVector, TItem, Distance>, TVector, Distance> {
 
         private ObjectSerializer<TId> itemIdSerializer;
         private ObjectSerializer<TItem> itemSerializer;
