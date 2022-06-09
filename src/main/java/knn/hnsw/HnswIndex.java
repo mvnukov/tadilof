@@ -2,8 +2,10 @@ package knn.hnsw;
 
 
 import knn.*;
-import knn.util.*;
 import knn.util.BitSet;
+import knn.util.*;
+import lombok.extern.slf4j.Slf4j;
+import org.eclipse.collections.api.list.primitive.ImmutableIntList;
 import org.eclipse.collections.api.list.primitive.MutableIntList;
 import org.eclipse.collections.api.map.primitive.MutableObjectIntMap;
 import org.eclipse.collections.api.map.primitive.MutableObjectLongMap;
@@ -12,6 +14,7 @@ import org.eclipse.collections.api.tuple.primitive.ObjectLongPair;
 import org.eclipse.collections.impl.list.mutable.primitive.IntArrayList;
 import org.eclipse.collections.impl.map.mutable.primitive.ObjectIntHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.ObjectLongHashMap;
+import org.slf4j.Logger;
 
 import java.io.*;
 import java.nio.file.Files;
@@ -19,19 +22,21 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Collectors;
 
 /**
  * Implementation of {@link Index} that implements the hnsw algorithm.
  *
- * @param <TId>       Type of the external identifier of an item
- * @param <TVector>   Type of the vector to perform distance calculation on
- * @param <TItem>     Type of items stored in the index
+ * @param <TId>      Type of the external identifier of an item
+ * @param <TVector>  Type of the vector to perform distance calculation on
+ * @param <Item>     Type of items stored in the index
  * @param <Distance> Type of distance between items (expect any numeric type: float, double, int, ..)
  * @see <a href="https://arxiv.org/abs/1603.09320">
  * Efficient and robust approximate nearest neighbor search using Hierarchical Navigable Small World graphs</a>
  */
-public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance> implements Index<TId, TVector,
-        TItem, Distance> {
+@Slf4j
+public class HnswIndex<TId, TVector, Item extends knn.Item<TId, TVector>, Distance>
+        implements Index<TId, TVector, Item, Distance> {
 
     private static final byte VERSION_1 = 0x01;
 
@@ -39,9 +44,9 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
 
     private static final int NO_NODE_ID = -1;
 
-    private DistanceFunction<TVector, Distance> distanceFunction;
+    DistanceFunction<TVector, Distance> distanceFunction;
     private Comparator<Distance> distanceComparator;
-    private MaxValueComparator<Distance> maxValueDistanceComparator;
+    MaxValueComparator<Distance> maxValueDistanceComparator;
 
     private int dimensions;
     private int maxItemCount;
@@ -53,17 +58,17 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
     private int efConstruction;
     private boolean removeEnabled;
 
-    private int nodeCount;
+    int nodeCount;
 
-    private volatile Node<TItem> entryPoint;
+    private volatile Node<Item> entryPoint;
 
-    private AtomicReferenceArray<Node<TItem>> nodes;
+    AtomicReferenceArray<Node<Item>> nodes;
     private MutableObjectIntMap<TId> lookup;
     private MutableObjectLongMap<TId> deletedItemVersions;
     private Map<TId, Object> locks;
 
     private ObjectSerializer<TId> itemIdSerializer;
-    private ObjectSerializer<TItem> itemSerializer;
+    private ObjectSerializer<Item> itemSerializer;
 
     private ReentrantLock globalLock;
 
@@ -71,9 +76,9 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
 
     private BitSet excludedCandidates;
 
-    private ExactView exactView;
+    private ExactView<TId, TVector, Item, Distance> exactView;
 
-    private HnswIndex(RefinedBuilder<TId, TVector, TItem, Distance> builder) {
+    private HnswIndex(RefinedBuilder<TId, TVector, Item, Distance> builder) {
 
         this.dimensions = builder.dimensions;
         this.maxItemCount = builder.maxItemCount;
@@ -83,10 +88,11 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
 
         this.m = builder.m;
         this.maxM = builder.m;
-        this.maxM0 = builder.m * 2;
         this.levelLambda = 1 / Math.log(this.m);
         this.efConstruction = Math.max(builder.efConstruction, m);
         this.ef = builder.ef;
+        this.maxM0 = ef;
+
         this.removeEnabled = builder.removeEnabled;
 
         this.nodes = new AtomicReferenceArray<>(this.maxItemCount);
@@ -104,7 +110,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
 
         this.excludedCandidates = new SynchronizedBitSet(new ArrayBitSet(this.maxItemCount));
 
-        this.exactView = new ExactView();
+        this.exactView = new ExactView(this);
     }
 
     /**
@@ -124,7 +130,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
      * {@inheritDoc}
      */
     @Override
-    public Optional<TItem> get(TId id) {
+    public Optional<Item> get(TId id) {
         globalLock.lock();
         try {
             int nodeId = lookup.getIfAbsent(id, NO_NODE_ID);
@@ -139,16 +145,31 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
         }
     }
 
+    public Optional<Node<Item>> getNode(TId id) {
+        globalLock.lock();
+        try {
+            int nodeId = lookup.getIfAbsent(id, NO_NODE_ID);
+
+            if (nodeId == NO_NODE_ID) {
+                return Optional.empty();
+            } else {
+                return Optional.of(nodes.get(nodeId));
+            }
+        } finally {
+            globalLock.unlock();
+        }
+    }
+
     /**
      * {@inheritDoc}
      */
     @Override
-    public Collection<TItem> items() {
+    public Collection<Item> items() {
         globalLock.lock();
         try {
-            List<TItem> results = new ArrayList<>(size());
+            List<Item> results = new ArrayList<>(size());
 
-            Iterator<TItem> iter = new ItemIterator();
+            Iterator<Item> iter = new ItemIterator();
 
             while (iter.hasNext()) {
                 results.add(iter.next());
@@ -179,7 +200,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
                 return false;
             }
 
-            Node<TItem> node = nodes.get(internalNodeId);
+            Node<Item> node = nodes.get(internalNodeId);
 
             if (version < node.item.version()) {
                 return false;
@@ -201,7 +222,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
      * {@inheritDoc}
      */
     @Override
-    public boolean add(TItem item) {
+    public boolean add(Item item) {
         if (item.dimensions() != dimensions) {
             throw new IllegalArgumentException("Item does not have dimensionality of : " + dimensions);
         }
@@ -226,7 +247,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
                     return false;
                 }
 
-                Node<TItem> node = nodes.get(existingNodeId);
+                Node<Item> node = nodes.get(existingNodeId);
 
                 if (item.version() < node.item.version()) {
                     return false;
@@ -251,7 +272,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
 
             excludedCandidates.add(newNodeId);
 
-            Node<TItem> newNode = new Node<>(newNodeId, connections, item, false);
+            Node<Item> newNode = new Node<>(newNodeId, connections, item, false);
 
             nodes.set(newNodeId, newNode);
             lookup.put(item.id(), newNodeId);
@@ -259,7 +280,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
 
             Object lock = locks.computeIfAbsent(item.id(), k -> new Object());
 
-            Node<TItem> entryPointCopy = entryPoint;
+            Node<Item> entryPointCopy = entryPoint;
 
             try {
                 synchronized (lock) {
@@ -269,7 +290,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
                             globalLock.unlock();
                         }
 
-                        Node<TItem> currObj = entryPointCopy;
+                        Node<Item> currObj = entryPointCopy;
 
                         if (currObj != null) {
 
@@ -285,13 +306,13 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
                                         changed = false;
 
                                         synchronized (currObj) {
-                                            MutableIntList candidateConnections = currObj.connections[activeLevel];
+                                            ImmutableIntList candidateConnections = currObj.getConnections(activeLevel);
 
                                             for (int i = 0; i < candidateConnections.size(); i++) {
 
                                                 int candidateId = candidateConnections.get(i);
 
-                                                Node<TItem> candidateNode = nodes.get(candidateId);
+                                                Node<Item> candidateNode = nodes.get(candidateId);
 
                                                 Distance candidateDistance = distanceFunction.distance(item.vector(), candidateNode.item.vector());
 
@@ -322,6 +343,8 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
                                 mutuallyConnectNewElement(newNode, topCandidates, level);
 
                             }
+
+                            notifyNeighbors(newNode);
                         }
 
                         // zoom out to the highest level
@@ -343,35 +366,59 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
         }
     }
 
-    private void mutuallyConnectNewElement(Node<TItem> newNode, PriorityQueue<NodeIdAndDistance<Distance>> topCandidates, int level) {
+    private void notifyNeighborsClear(Node<Item> newNode) {
+        var neighbors = newNode.getConnections(0);
+        neighbors.forEach(neighborNodeId -> {
+            var neighborNode = nodes.get(neighborNodeId);
+
+            neighborNode.removeRKnn(newNode.id);
+        });
+
+    }
+
+    private void notifyNeighbors(Node<Item> newNode) {
+        var neighbors = newNode.getConnections(0);
+        neighbors.forEach(neighborNodeId -> {
+            var neighborNode = nodes.get(neighborNodeId);
+
+            neighborNode.addRKnn(newNode.id);
+        });
+    }
+
+    private void mutuallyConnectNewElement(Node<Item> newNode, PriorityQueue<NodeIdAndDistance<Distance>> topCandidates, int level) {
 
         int bestN = level == 0 ? this.maxM0 : this.maxM;
 
         int newNodeId = newNode.id;
         TVector newItemVector = newNode.item.vector();
-        MutableIntList newItemConnections = newNode.connections[level];
 
-        getNeighborsByHeuristic2(topCandidates, m);
+        getNeighborsByHeuristic3(topCandidates, m);
 
-        while (!topCandidates.isEmpty()) {
-            int selectedNeighbourId = topCandidates.poll().nodeId;
+        log.trace("topCandidates: {}", topCandidates);
+        PriorityQueue<NodeIdAndDistance<Distance>> topCandidates2 =
+                new PriorityQueue<>(Comparator.<NodeIdAndDistance<Distance>>naturalOrder());
+
+        topCandidates2.addAll(topCandidates);
+
+        while (!topCandidates2.isEmpty()) {
+            int selectedNeighbourId = topCandidates2.poll().nodeId;
 
             if (excludedCandidates.contains(selectedNeighbourId)) {
                 continue;
             }
 
-            newItemConnections.add(selectedNeighbourId);
+            newNode.addNeighbor(level, selectedNeighbourId);
 
-            Node<TItem> neighbourNode = nodes.get(selectedNeighbourId);
+            Node<Item> neighbourNode = nodes.get(selectedNeighbourId);
 
             synchronized (neighbourNode) {
 
                 TVector neighbourVector = neighbourNode.item.vector();
 
-                MutableIntList neighbourConnectionsAtLevel = neighbourNode.connections[level];
+                ImmutableIntList neighbourConnectionsAtLevel = neighbourNode.getConnections(level);
 
                 if (neighbourConnectionsAtLevel.size() < bestN) {
-                    neighbourConnectionsAtLevel.add(newNodeId);
+                    neighbourNode.addNeighbor(level, newNodeId);
                 } else {
                     // finding the "weakest" element to replace it with the new one
 
@@ -388,15 +435,27 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
                         candidates.add(new NodeIdAndDistance<>(id, dist, maxValueDistanceComparator));
                     });
 
-                    getNeighborsByHeuristic2(candidates, bestN);
+                    getNeighborsByHeuristic3(candidates, bestN);
 
-                    neighbourConnectionsAtLevel.clear();
+                    if (level == 0) {
+                        notifyNeighborsClear(neighbourNode);
+                    }
+
+                    neighbourNode.clear(level);
 
                     while (!candidates.isEmpty()) {
-                        neighbourConnectionsAtLevel.add(candidates.poll().nodeId);
+                        neighbourNode.addNeighbor(level, candidates.poll().nodeId);
                     }
                 }
+                if (level == 0) {
+                    notifyNeighbors(neighbourNode);
+                }
             }
+        }
+    }
+    private void getNeighborsByHeuristic3(PriorityQueue<NodeIdAndDistance<Distance>> topCandidates, int m) {
+        while(topCandidates.size() > m) {
+            topCandidates.poll();
         }
     }
 
@@ -441,24 +500,31 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
         topCandidates.addAll(returnList);
     }
 
-    @Override
-    public List<SearchResult<TItem, Distance>> findReverseNearest(TVector vector, int k) {
-        return null;
+
+    public Optional<Set<Item>> findReverseNeighbors(TId tId) {
+        Optional<Set<Item>> o = getNode(tId)
+                .map(node -> node.reverseConnections)
+                .map(reverseConnections -> reverseConnections.stream()
+                        .map(reverseNeighbor -> {
+                            Node<Item> tItemNode = nodes.get(reverseNeighbor);
+                            return tItemNode.item;
+                        })
+                        .collect(Collectors.toSet()));
+        return o;
     }
+
     /**
      * {@inheritDoc}
      */
     @Override
-    public List<SearchResult<TItem, Distance>> findNearest(TVector destination, int k) {
+    public List<SearchResult<Item, Distance>> findNearest(TVector destination, int k) {
 
         if (entryPoint == null) {
             return Collections.emptyList();
         }
 
-        Node<TItem> entryPointCopy = entryPoint;
-
-        Node<TItem> currObj = entryPointCopy;
-
+        Node<Item> entryPointCopy = entryPoint;
+        Node<Item> currObj = entryPointCopy;
         Distance curDist = distanceFunction.distance(destination, currObj.item.vector());
 
         for (int activeLevel = entryPointCopy.maxLevel(); activeLevel > 0; activeLevel--) {
@@ -469,10 +535,9 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
                 changed = false;
 
                 synchronized (currObj) {
-                    MutableIntList candidateConnections = currObj.connections[activeLevel];
+                    ImmutableIntList candidateConnections = currObj.getConnections(activeLevel);
 
                     for (int i = 0; i < candidateConnections.size(); i++) {
-
                         int candidateId = candidateConnections.get(i);
 
                         Distance candidateDistance = distanceFunction.distance(destination, nodes.get(candidateId).item.vector());
@@ -493,7 +558,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
             topCandidates.poll();
         }
 
-        List<SearchResult<TItem, Distance>> results = new ArrayList<>(topCandidates.size());
+        List<SearchResult<Item, Distance>> results = new ArrayList<>(topCandidates.size());
         while (!topCandidates.isEmpty()) {
             NodeIdAndDistance<Distance> pair = topCandidates.poll();
             results.add(0, new SearchResult<>(nodes.get(pair.nodeId).item, pair.distance, maxValueDistanceComparator));
@@ -502,7 +567,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
         return results;
     }
 
-    private PriorityQueue<NodeIdAndDistance<Distance>> searchBaseLayer(Node<TItem> entryPointNode, TVector destination, int k, int layer) {
+    private PriorityQueue<NodeIdAndDistance<Distance>> searchBaseLayer(Node<Item> entryPointNode, TVector destination, int k, int layer) {
 
         BitSet visitedBitSet = visitedBitSetPool.borrowObject();
 
@@ -536,11 +601,11 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
                     break;
                 }
 
-                Node<TItem> node = nodes.get(currentPair.nodeId);
+                Node<Item> node = nodes.get(currentPair.nodeId);
 
                 synchronized (node) {
 
-                    MutableIntList candidates = node.connections[layer];
+                    ImmutableIntList candidates = node.getConnections(layer);
 
                     for (int i = 0; i < candidates.size(); i++) {
 
@@ -550,7 +615,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
 
                             visitedBitSet.add(candidateId);
 
-                            Node<TItem> candidateNode = nodes.get(candidateId);
+                            Node<Item> candidateNode = nodes.get(candidateId);
 
                             Distance candidateDistance = distanceFunction.distance(destination, candidateNode.item.vector());
 
@@ -592,7 +657,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
      *
      * @return read only view on top of this index that uses pairwise comparision when doing distance search
      */
-    public Index<TId, TVector, TItem, Distance> asExactIndex() {
+    public Index<TId, TVector, Item, Distance> asExactIndex() {
         return exactView;
     }
 
@@ -692,7 +757,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
      *
      * @return the serializer used to serialize items when saving the index
      */
-    public ObjectSerializer<TItem> getItemSerializer() {
+    public ObjectSerializer<Item> getItemSerializer() {
         return itemSerializer;
     }
 
@@ -736,7 +801,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
         this.distanceComparator = (Comparator<Distance>) ois.readObject();
         this.maxValueDistanceComparator = new MaxValueComparator<>(distanceComparator);
         this.itemIdSerializer = (ObjectSerializer<TId>) ois.readObject();
-        this.itemSerializer = (ObjectSerializer<TItem>) ois.readObject();
+        this.itemSerializer = (ObjectSerializer<Item>) ois.readObject();
 
         this.maxItemCount = ois.readInt();
         this.m = ois.readInt();
@@ -758,7 +823,7 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
         this.visitedBitSetPool = new GenericObjectPool<>(() -> new ArrayBitSet(this.maxItemCount), Runtime.getRuntime().availableProcessors());
         this.excludedCandidates = new SynchronizedBitSet(new ArrayBitSet(this.maxItemCount));
         this.locks = new HashMap<>();
-        this.exactView = new ExactView();
+        this.exactView = new ExactView(this);
     }
 
     private void writeMutableObjectIntMap(ObjectOutputStream oos, MutableObjectIntMap<TId> map) throws IOException {
@@ -779,674 +844,525 @@ public class HnswIndex<TId, TVector, TItem extends Item<TId, TVector>, Distance>
         }
     }
 
-    private void writeNodesArray(ObjectOutputStream oos, AtomicReferenceArray<Node<TItem>> nodes) throws IOException {
+    private void writeNodesArray(ObjectOutputStream oos, AtomicReferenceArray<Node<Item>> nodes) throws IOException {
         oos.writeInt(nodes.length());
         for (int i = 0; i < nodes.length(); i++) {
-            writeNode(oos, nodes.get(i));
-        }
-    }
-
-    private void writeNode(ObjectOutputStream oos, Node<TItem> node) throws IOException {
-        if (node == null) {
-            oos.writeInt(-1);
-        } else {
-            oos.writeInt(node.id);
-            oos.writeInt(node.connections.length);
-
-            for (MutableIntList connections : node.connections) {
-                oos.writeInt(connections.size());
-                for (int j = 0; j < connections.size(); j++) {
-                    oos.writeInt(connections.get(j));
-                }
+            if (nodes.get(i) == null) {
+                oos.writeInt(-1);
+            } else {
+                nodes.get(i).writeNode(oos);
             }
-            itemSerializer.write(node.item, oos);
-            oos.writeBoolean(node.deleted);
         }
     }
 
-    /**
-     * Restores a {@link HnswIndex} from a File.
-     *
-     * @param file        File to restore the index from
-     * @param <TId>       Type of the external identifier of an item
-     * @param <TVector>   Type of the vector to perform distance calculation on
-     * @param <TItem>     Type of items stored in the index
-     * @param <Distance> Type of distance between items (expect any numeric type: float, double, int, ..)
-     * @return The restored index
-     * @throws IOException in case of an I/O exception
-     */
-    public static <TId, TVector, TItem extends Item<TId, TVector>, Distance> HnswIndex<TId, TVector, TItem, Distance> load(File file) throws IOException {
-        return load(new FileInputStream(file));
-    }
-
-    /**
-     * Restores a {@link HnswIndex} from a File.
-     *
-     * @param file        File to restore the index from
-     * @param classLoader the classloader to use
-     * @param <TId>       Type of the external identifier of an item
-     * @param <TVector>   Type of the vector to perform distance calculation on
-     * @param <TItem>     Type of items stored in the index
-     * @param <Distance> Type of distance between items (expect any numeric type: float, double, int, ..)
-     * @return The restored index
-     * @throws IOException in case of an I/O exception
-     */
-    public static <TId, TVector, TItem extends Item<TId, TVector>, Distance> HnswIndex<TId, TVector, TItem, Distance>
-        load(File file, ClassLoader classLoader) throws IOException {
-        return load(new FileInputStream(file), classLoader);
-    }
-
-    /**
-     * Restores a {@link HnswIndex} from a Path.
-     *
-     * @param path        Path to restore the index from
-     * @param <TId>       Type of the external identifier of an item
-     * @param <TVector>   Type of the vector to perform distance calculation on
-     * @param <TItem>     Type of items stored in the index
-     * @param <Distance> Type of distance between items (expect any numeric type: float, double, int, ..)
-     * @return The restored index
-     * @throws IOException in case of an I/O exception
-     */
-    public static <TId, TVector, TItem extends Item<TId, TVector>, Distance> HnswIndex<TId, TVector, TItem, Distance>
-    load(Path path) throws IOException {
-        return load(Files.newInputStream(path));
-    }
-
-    /**
-     * Restores a {@link HnswIndex} from a Path.
-     *
-     * @param path        Path to restore the index from
-     * @param classLoader the classloader to use
-     * @param <TId>       Type of the external identifier of an item
-     * @param <TVector>   Type of the vector to perform distance calculation on
-     * @param <TItem>     Type of items stored in the index
-     * @param <Distance> Type of distance between items (expect any numeric type: float, double, int, ..)
-     * @return The restored index
-     * @throws IOException in case of an I/O exception
-     */
-    public static <TId, TVector, TItem extends Item<TId, TVector>, Distance> HnswIndex<TId, TVector, TItem, Distance>
-    load(Path path, ClassLoader classLoader) throws IOException {
-        return load(Files.newInputStream(path), classLoader);
-    }
-
-    /**
-     * Restores a {@link HnswIndex} from an InputStream.
-     *
-     * @param inputStream InputStream to restore the index from
-     * @param <TId>       Type of the external identifier of an item
-     * @param <TVector>   Type of the vector to perform distance calculation on
-     * @param <TItem>     Type of items stored in the index
-     * @param <Distance> Type of distance between items (expect any numeric type: float, double, int, ...).
-     * @return The restored index
-     * @throws IOException              in case of an I/O exception
-     * @throws IllegalArgumentException in case the file cannot be read
-     */
-    public static <TId, TVector, TItem extends Item<TId, TVector>, Distance> HnswIndex<TId, TVector, TItem, Distance>
-        load(InputStream inputStream) throws IOException {
-        return load(inputStream, Thread.currentThread().getContextClassLoader());
-    }
-
-    /**
-     * Restores a {@link HnswIndex} from an InputStream.
-     *
-     * @param inputStream InputStream to restore the index from
-     * @param classLoader the classloader to use
-     * @param <TId>       Type of the external identifier of an item
-     * @param <TVector>   Type of the vector to perform distance calculation on
-     * @param <TItem>     Type of items stored in the index
-     * @param <Distance> Type of distance between items (expect any numeric type: float, double, int, ...).
-     * @return The restored index
-     * @throws IOException              in case of an I/O exception
-     * @throws IllegalArgumentException in case the file cannot be read
-     */
-    @SuppressWarnings("unchecked")
-    public static <TId, TVector, TItem extends Item<TId, TVector>, Distance> HnswIndex<TId, TVector, TItem, Distance>
-        load(InputStream inputStream, ClassLoader classLoader) throws IOException {
-
-        try (ObjectInputStream ois = new ClassLoaderObjectInputStream(classLoader, inputStream)) {
-            return (HnswIndex<TId, TVector, TItem, Distance>) ois.readObject();
-        } catch (ClassNotFoundException e) {
-            throw new IllegalArgumentException("Could not read input file.", e);
-        }
-    }
-
-    private static IntArrayList readIntArrayList(ObjectInputStream ois, int initialSize) throws IOException {
-        int size = ois.readInt();
-
-        IntArrayList list = new IntArrayList(initialSize);
-
-        for (int j = 0; j < size; j++) {
-            list.add(ois.readInt());
+        /**
+         * Restores a {@link HnswIndex} from a File.
+         *
+         * @param file       File to restore the index from
+         * @param <TId>      Type of the external identifier of an item
+         * @param <TVector>  Type of the vector to perform distance calculation on
+         * @param <TItem>    Type of items stored in the index
+         * @param <Distance> Type of distance between items (expect any numeric type: float, double, int, ..)
+         * @return The restored index
+         * @throws IOException in case of an I/O exception
+         */
+        public static <TId, TVector, TItem extends knn.Item<TId, TVector>,
+        Distance > HnswIndex < TId, TVector, TItem, Distance > load(File file) throws IOException {
+            return load(new FileInputStream(file));
         }
 
-        return list;
-    }
+        /**
+         * Restores a {@link HnswIndex} from a File.
+         *
+         * @param file        File to restore the index from
+         * @param classLoader the classloader to use
+         * @param <TId>       Type of the external identifier of an item
+         * @param <TVector>   Type of the vector to perform distance calculation on
+         * @param <TItem>     Type of items stored in the index
+         * @param <Distance>  Type of distance between items (expect any numeric type: float, double, int, ..)
+         * @return The restored index
+         * @throws IOException in case of an I/O exception
+         */
+        public static <TId, TVector, TItem extends knn.Item<TId, TVector>,
+        Distance > HnswIndex < TId, TVector, TItem, Distance >
+                load(File file, ClassLoader classLoader) throws IOException {
+            return load(new FileInputStream(file), classLoader);
+        }
 
-    private static <TItem> Node<TItem> readNode(ObjectInputStream ois, ObjectSerializer<TItem> itemSerializer, int maxM0, int maxM) throws IOException, ClassNotFoundException {
+        /**
+         * Restores a {@link HnswIndex} from a Path.
+         *
+         * @param path       Path to restore the index from
+         * @param <TId>      Type of the external identifier of an item
+         * @param <TVector>  Type of the vector to perform distance calculation on
+         * @param <TItem>    Type of items stored in the index
+         * @param <Distance> Type of distance between items (expect any numeric type: float, double, int, ..)
+         * @return The restored index
+         * @throws IOException in case of an I/O exception
+         */
+        public static <TId, TVector, TItem extends knn.Item<TId, TVector>,
+        Distance > HnswIndex < TId, TVector, TItem, Distance >
+                load(Path path) throws IOException {
+            return load(Files.newInputStream(path));
+        }
 
-        int id = ois.readInt();
+        /**
+         * Restores a {@link HnswIndex} from a Path.
+         *
+         * @param path        Path to restore the index from
+         * @param classLoader the classloader to use
+         * @param <TId>       Type of the external identifier of an item
+         * @param <TVector>   Type of the vector to perform distance calculation on
+         * @param <TItem>     Type of items stored in the index
+         * @param <Distance>  Type of distance between items (expect any numeric type: float, double, int, ..)
+         * @return The restored index
+         * @throws IOException in case of an I/O exception
+         */
+        public static <TId, TVector, TItem extends knn.Item<TId, TVector>,
+        Distance > HnswIndex < TId, TVector, TItem, Distance >
+                load(Path path, ClassLoader classLoader) throws IOException {
+            return load(Files.newInputStream(path), classLoader);
+        }
 
-        if (id == -1) {
-            return null;
-        } else {
-            int connectionsSize = ois.readInt();
+        /**
+         * Restores a {@link HnswIndex} from an InputStream.
+         *
+         * @param inputStream InputStream to restore the index from
+         * @param <TId>       Type of the external identifier of an item
+         * @param <TVector>   Type of the vector to perform distance calculation on
+         * @param <TItem>     Type of items stored in the index
+         * @param <Distance>  Type of distance between items (expect any numeric type: float, double, int, ...).
+         * @return The restored index
+         * @throws IOException              in case of an I/O exception
+         * @throws IllegalArgumentException in case the file cannot be read
+         */
+        public static <TId, TVector, TItem extends knn.Item<TId, TVector>,
+        Distance > HnswIndex < TId, TVector, TItem, Distance >
+                load(InputStream inputStream) throws IOException {
+            return load(inputStream, Thread.currentThread().getContextClassLoader());
+        }
 
-            MutableIntList[] connections = new MutableIntList[connectionsSize];
+        /**
+         * Restores a {@link HnswIndex} from an InputStream.
+         *
+         * @param inputStream InputStream to restore the index from
+         * @param classLoader the classloader to use
+         * @param <TId>       Type of the external identifier of an item
+         * @param <TVector>   Type of the vector to perform distance calculation on
+         * @param <TItem>     Type of items stored in the index
+         * @param <Distance>  Type of distance between items (expect any numeric type: float, double, int, ...).
+         * @return The restored index
+         * @throws IOException              in case of an I/O exception
+         * @throws IllegalArgumentException in case the file cannot be read
+         */
+        @SuppressWarnings("unchecked")
+        public static <TId, TVector, TItem extends knn.Item<TId, TVector>,
+        Distance > HnswIndex < TId, TVector, TItem, Distance >
+                load(InputStream inputStream, ClassLoader classLoader) throws IOException {
 
-            for (int i = 0; i < connectionsSize; i++) {
-                int levelM = i == 0 ? maxM0 : maxM;
-                connections[i] = readIntArrayList(ois, levelM);
+            try (ObjectInputStream ois = new ClassLoaderObjectInputStream(classLoader, inputStream)) {
+                return (HnswIndex<TId, TVector, TItem, Distance>) ois.readObject();
+            } catch (ClassNotFoundException e) {
+                throw new IllegalArgumentException("Could not read input file.", e);
+            }
+        }
+
+        private static IntArrayList readIntArrayList (ObjectInputStream ois,int initialSize) throws IOException {
+            int size = ois.readInt();
+
+            IntArrayList list = new IntArrayList(initialSize);
+
+            for (int j = 0; j < size; j++) {
+                list.add(ois.readInt());
             }
 
-            TItem item = itemSerializer.read(ois);
-
-            boolean deleted = ois.readBoolean();
-
-            return new Node<>(id, connections, item, deleted);
-        }
-    }
-
-    private static <TItem> AtomicReferenceArray<Node<TItem>> readNodesArray(ObjectInputStream ois, ObjectSerializer<TItem> itemSerializer, int maxM0, int maxM) throws IOException, ClassNotFoundException {
-
-        int size = ois.readInt();
-        AtomicReferenceArray<Node<TItem>> nodes = new AtomicReferenceArray<>(size);
-
-        for (int i = 0; i < nodes.length(); i++) {
-            nodes.set(i, readNode(ois, itemSerializer, maxM0, maxM));
+            return list;
         }
 
-        return nodes;
-    }
+        private static <
+        TItem > Node < TItem > readNode(ObjectInputStream ois, ObjectSerializer < TItem > itemSerializer, int maxM0,
+        int maxM) throws IOException, ClassNotFoundException {
 
-    private static <TId> MutableObjectIntMap<TId> readMutableObjectIntMap(ObjectInputStream ois, ObjectSerializer<TId> itemIdSerializer) throws IOException, ClassNotFoundException {
+            int id = ois.readInt();
 
-        int size = ois.readInt();
+            if (id == -1) {
+                return null;
+            } else {
+                int connectionsSize = ois.readInt();
 
-        MutableObjectIntMap<TId> map = new ObjectIntHashMap<>(size);
+                MutableIntList[] connections = new MutableIntList[connectionsSize];
 
-        for (int i = 0; i < size; i++) {
-            TId key = itemIdSerializer.read(ois);
-            int value = ois.readInt();
-
-            map.put(key, value);
-        }
-        return map;
-    }
-
-    private static <TId> MutableObjectLongMap<TId> readMutableObjectLongMap(ObjectInputStream ois, ObjectSerializer<TId> itemIdSerializer) throws IOException, ClassNotFoundException {
-
-        int size = ois.readInt();
-
-        MutableObjectLongMap<TId> map = new ObjectLongHashMap<>(size);
-
-        for (int i = 0; i < size; i++) {
-            TId key = itemIdSerializer.read(ois);
-            long value = ois.readLong();
-
-            map.put(key, value);
-        }
-        return map;
-    }
-
-    /**
-     * Start the process of building a new HNSW index.
-     *
-     * @param dimensions       the dimensionality of the vectors stored in the index
-     * @param distanceFunction the distance function
-     * @param maxItemCount     maximum number of items the index can hold
-     * @param <TVector>        Type of the vector to perform distance calculation on
-     * @param <Distance>      Type of distance between items (expect any numeric type: float, double, int, ..)
-     * @return a builder
-     */
-    public static <TVector, Distance extends Comparable<Distance>> Builder<TVector, Distance> newBuilder(int dimensions, DistanceFunction<TVector, Distance> distanceFunction, int maxItemCount) {
-
-        Comparator<Distance> distanceComparator = Comparator.naturalOrder();
-
-        return new Builder<>(dimensions, distanceFunction, distanceComparator, maxItemCount);
-    }
-
-    /**
-     * Start the process of building a new HNSW index.
-     *
-     * @param dimensions         the dimensionality of the vectors stored in the index
-     * @param distanceFunction   the distance function
-     * @param distanceComparator used to compare distances
-     * @param maxItemCount       maximum number of items the index can hold
-     * @param <TVector>          Type of the vector to perform distance calculation on
-     * @param <Distance>        Type of distance between items (expect any numeric type: float, double, int, ..)
-     * @return a builder
-     */
-    public static <TVector, Distance> Builder<TVector, Distance> newBuilder(int dimensions, DistanceFunction<TVector, Distance> distanceFunction, Comparator<Distance> distanceComparator, int maxItemCount) {
-
-        return new Builder<>(dimensions, distanceFunction, distanceComparator, maxItemCount);
-    }
-
-    private int assignLevel(TId value, double lambda) {
-
-        // by relying on the external id to come up with the level, the graph construction should be a lot mor stable
-        // see : https://github.com/nmslib/hnswlib/issues/28
-
-        int hashCode = value.hashCode();
-
-        byte[] bytes = new byte[]{(byte) (hashCode >> 24), (byte) (hashCode >> 16), (byte) (hashCode >> 8), (byte) hashCode};
-
-        double random = Math.abs((double) Murmur3.hash32(bytes) / (double) Integer.MAX_VALUE);
-
-        double r = -Math.log(random) * lambda;
-        return (int) r;
-    }
-
-    private boolean lt(Distance x, Distance y) {
-        return maxValueDistanceComparator.compare(x, y) < 0;
-    }
-
-    private boolean gt(Distance x, Distance y) {
-        return maxValueDistanceComparator.compare(x, y) > 0;
-    }
-
-    class ExactView implements Index<TId, TVector, TItem, Distance> {
-
-        private static final long serialVersionUID = 1L;
-
-        @Override
-        public int size() {
-            return HnswIndex.this.size();
-        }
-
-        @Override
-        public Optional<TItem> get(TId tId) {
-            return HnswIndex.this.get(tId);
-        }
-
-
-        @Override
-        public Collection<TItem> items() {
-            return HnswIndex.this.items();
-        }
-
-        @Override
-        public List<SearchResult<TItem, Distance>> findNearest(TVector vector, int k) {
-
-            Comparator<SearchResult<TItem, Distance>> comparator = Comparator.<SearchResult<TItem, Distance>>naturalOrder().reversed();
-
-            PriorityQueue<SearchResult<TItem, Distance>> queue = new PriorityQueue<>(k, comparator);
-
-            for (int i = 0; i < nodeCount; i++) {
-                Node<TItem> node = nodes.get(i);
-                if (node == null || node.deleted) {
-                    continue;
+                for (int i = 0; i < connectionsSize; i++) {
+                    int levelM = i == 0 ? maxM0 : maxM;
+                    connections[i] = readIntArrayList(ois, levelM);
                 }
 
-                Distance distance = distanceFunction.distance(node.item.vector(), vector);
+                TItem item = itemSerializer.read(ois);
 
-                SearchResult<TItem, Distance> searchResult = new SearchResult<>(node.item, distance, maxValueDistanceComparator);
-                queue.add(searchResult);
+                boolean deleted = ois.readBoolean();
 
-                if (queue.size() > k) {
-                    queue.poll();
-                }
+                return new Node<>(id, connections, item, deleted);
+            }
+        }
+
+        private static <
+        TItem > AtomicReferenceArray < Node < TItem >> readNodesArray(ObjectInputStream ois, ObjectSerializer < TItem > itemSerializer,
+        int maxM0, int maxM) throws IOException, ClassNotFoundException {
+
+            int size = ois.readInt();
+            AtomicReferenceArray<Node<TItem>> nodes = new AtomicReferenceArray<>(size);
+
+            for (int i = 0; i < nodes.length(); i++) {
+                nodes.set(i, readNode(ois, itemSerializer, maxM0, maxM));
             }
 
-            List<SearchResult<TItem, Distance>> results = new ArrayList<>(queue.size());
+            return nodes;
+        }
 
-            SearchResult<TItem, Distance> result;
-            while ((result = queue.poll()) != null) { // if you iterate over a priority queue the order is not guaranteed
-                results.add(0, result);
+        private static <
+        TId > MutableObjectIntMap < TId > readMutableObjectIntMap(ObjectInputStream ois, ObjectSerializer < TId > itemIdSerializer) throws
+        IOException, ClassNotFoundException {
+
+            int size = ois.readInt();
+
+            MutableObjectIntMap<TId> map = new ObjectIntHashMap<>(size);
+
+            for (int i = 0; i < size; i++) {
+                TId key = itemIdSerializer.read(ois);
+                int value = ois.readInt();
+
+                map.put(key, value);
+            }
+            return map;
+        }
+
+        private static <
+        TId > MutableObjectLongMap < TId > readMutableObjectLongMap(ObjectInputStream ois, ObjectSerializer < TId > itemIdSerializer) throws
+        IOException, ClassNotFoundException {
+
+            int size = ois.readInt();
+
+            MutableObjectLongMap<TId> map = new ObjectLongHashMap<>(size);
+
+            for (int i = 0; i < size; i++) {
+                TId key = itemIdSerializer.read(ois);
+                long value = ois.readLong();
+
+                map.put(key, value);
+            }
+            return map;
+        }
+
+        /**
+         * Start the process of building a new HNSW index.
+         *
+         * @param dimensions       the dimensionality of the vectors stored in the index
+         * @param distanceFunction the distance function
+         * @param maxItemCount     maximum number of items the index can hold
+         * @param <TVector>        Type of the vector to perform distance calculation on
+         * @param <Distance>       Type of distance between items (expect any numeric type: float, double, int, ..)
+         * @return a builder
+         */
+        public static <TVector, Distance extends Comparable<Distance>>Builder<TVector, Distance> newBuilder (
+        int dimensions, DistanceFunction<TVector, Distance > distanceFunction,int maxItemCount){
+
+            Comparator<Distance> distanceComparator = Comparator.naturalOrder();
+
+            return new Builder<>(dimensions, distanceFunction, distanceComparator, maxItemCount);
+        }
+
+        /**
+         * Start the process of building a new HNSW index.
+         *
+         * @param dimensions         the dimensionality of the vectors stored in the index
+         * @param distanceFunction   the distance function
+         * @param distanceComparator used to compare distances
+         * @param maxItemCount       maximum number of items the index can hold
+         * @param <TVector>          Type of the vector to perform distance calculation on
+         * @param <Distance>         Type of distance between items (expect any numeric type: float, double, int, ..)
+         * @return a builder
+         */
+        public static <TVector, Distance > Builder < TVector, Distance > newBuilder( int dimensions, DistanceFunction<
+        TVector, Distance > distanceFunction, Comparator < Distance > distanceComparator,int maxItemCount){
+
+            return new Builder<>(dimensions, distanceFunction, distanceComparator, maxItemCount);
+        }
+
+        private int assignLevel (TId value,double lambda){
+
+            // by relying on the external id to come up with the level, the graph construction should be a lot mor stable
+            // see : https://github.com/nmslib/hnswlib/issues/28
+
+            int hashCode = value.hashCode();
+
+            byte[] bytes = new byte[]{(byte) (hashCode >> 24), (byte) (hashCode >> 16), (byte) (hashCode >> 8), (byte) hashCode};
+
+            double random = Math.abs((double) Murmur3.hash32(bytes) / (double) Integer.MAX_VALUE);
+
+            double r = -Math.log(random) * lambda;
+            return (int) r;
+        }
+
+        private boolean lt (Distance x, Distance y){
+            return maxValueDistanceComparator.compare(x, y) < 0;
+        }
+
+        private boolean gt (Distance x, Distance y){
+            return maxValueDistanceComparator.compare(x, y) > 0;
+        }
+
+        class ItemIterator implements Iterator<Item> {
+
+            private int done = 0;
+            private int index = 0;
+
+            @Override
+            public boolean hasNext() {
+                return done < HnswIndex.this.size();
             }
 
-            return results;
+            @Override
+            public Item next() {
+                Node<Item> node;
+
+                do {
+                    node = HnswIndex.this.nodes.get(index++);
+                } while (node == null || node.deleted);
+
+                done++;
+
+                return node.item;
+            }
         }
-
-        @Override
-        public List<SearchResult<TItem, Distance>> findReverseNearest(TVector tVector, int k) {
-            return null;
-        }
-
-        @Override
-        public List<SearchResult<TItem, Distance>> findNeighbors(TId tId, int k) {
-            return Index.super.findNeighbors(tId, k);
-        }
-
-        @Override
-        public List<SearchResult<TItem, Distance>> findReverseNeighbors(TId tId, int k) {
-            return Index.super.findReverseNeighbors(tId, k);
-        }
-
-        @Override
-        public boolean add(TItem item) {
-            return HnswIndex.this.add(item);
-        }
-
-        @Override
-        public boolean remove(TId id, long version) {
-            return HnswIndex.this.remove(id, version);
-        }
-
-        @Override
-        public void save(OutputStream out) throws IOException {
-            HnswIndex.this.save(out);
-        }
-
-        @Override
-        public void save(File file) throws IOException {
-            HnswIndex.this.save(file);
-        }
-
-        @Override
-        public void save(Path path) throws IOException {
-            HnswIndex.this.save(path);
-        }
-
-        @Override
-        public void addAll(Collection<TItem> items) throws InterruptedException {
-            HnswIndex.this.addAll(items);
-        }
-
-        @Override
-        public void addAll(Collection<TItem> items, ProgressListener listener) throws InterruptedException {
-            HnswIndex.this.addAll(items, listener);
-        }
-
-        @Override
-        public void addAll(Collection<TItem> items, int numThreads, ProgressListener listener, int progressUpdateInterval) throws InterruptedException {
-            HnswIndex.this.addAll(items, numThreads, listener, progressUpdateInterval);
-        }
-    }
-
-    class ItemIterator implements Iterator<TItem> {
-
-        private int done = 0;
-        private int index = 0;
-
-        @Override
-        public boolean hasNext() {
-            return done < HnswIndex.this.size();
-        }
-
-        @Override
-        public TItem next() {
-            Node<TItem> node;
-
-            do {
-                node = HnswIndex.this.nodes.get(index++);
-            } while (node == null || node.deleted);
-
-            done++;
-
-            return node.item;
-        }
-    }
-
-    static class Node<TItem> implements Serializable {
-
-        private static final long serialVersionUID = 1L;
-
-        final int id;
-
-        final MutableIntList[] connections;
-
-        volatile TItem item;
-
-        volatile boolean deleted;
-
-        Node(int id, MutableIntList[] connections, TItem item, boolean deleted) {
-            this.id = id;
-            this.connections = connections;
-            this.item = item;
-            this.deleted = deleted;
-        }
-
-        int maxLevel() {
-            return this.connections.length - 1;
-        }
-    }
-
-    static class NodeIdAndDistance<Distance> implements Comparable<NodeIdAndDistance<Distance>> {
-
-        final int nodeId;
-        final Distance distance;
-        final Comparator<Distance> distanceComparator;
-
-        NodeIdAndDistance(int nodeId, Distance distance, Comparator<Distance> distanceComparator) {
-            this.nodeId = nodeId;
-            this.distance = distance;
-            this.distanceComparator = distanceComparator;
-        }
-
-        @Override
-        public int compareTo(NodeIdAndDistance<Distance> o) {
-            return distanceComparator.compare(distance, o.distance);
-        }
-    }
 
 
     static class MaxValueComparator<Distance> implements Comparator<Distance>, Serializable {
 
-        private static final long serialVersionUID = 1L;
+            private static final long serialVersionUID = 1L;
 
-        private final Comparator<Distance> delegate;
+            private final Comparator<Distance> delegate;
 
-        MaxValueComparator(Comparator<Distance> delegate) {
-            this.delegate = delegate;
+            MaxValueComparator(Comparator<Distance> delegate) {
+                this.delegate = delegate;
+            }
+
+            @Override
+            public int compare(Distance o1, Distance o2) {
+                return o1 == null ? o2 == null ? 0 : 1 : o2 == null ? -1 : delegate.compare(o1, o2);
+            }
+
+            static <Distance> Distance maxValue() {
+                return null;
+            }
         }
 
-        @Override
-        public int compare(Distance o1, Distance o2) {
-            return o1 == null ? o2 == null ? 0 : 1 : o2 == null ? -1 : delegate.compare(o1, o2);
+        /**
+         * Base class for HNSW index builders.
+         *
+         * @param <TBuilder> Concrete class that extends from this builder
+         * @param <TVector>  Type of the vector to perform distance calculation on
+         * @param <Distance> Type of items stored in the index
+         */
+        public static abstract class BuilderBase<TBuilder extends BuilderBase<TBuilder, TVector, Distance>, TVector, Distance> {
+
+            public static final int DEFAULT_M = 10;
+            public static final int DEFAULT_EF = 10;
+            public static final int DEFAULT_EF_CONSTRUCTION = 200;
+            public static final boolean DEFAULT_REMOVE_ENABLED = false;
+
+            int dimensions;
+            DistanceFunction<TVector, Distance> distanceFunction;
+            Comparator<Distance> distanceComparator;
+
+            int maxItemCount;
+
+            int m = DEFAULT_M;
+            int ef = DEFAULT_EF;
+            int efConstruction = DEFAULT_EF_CONSTRUCTION;
+            boolean removeEnabled = DEFAULT_REMOVE_ENABLED;
+
+            BuilderBase(int dimensions, DistanceFunction<TVector, Distance> distanceFunction, Comparator<Distance> distanceComparator, int maxItemCount) {
+
+                this.dimensions = dimensions;
+                this.distanceFunction = distanceFunction;
+                this.distanceComparator = distanceComparator;
+                this.maxItemCount = maxItemCount;
+            }
+
+            abstract TBuilder self();
+
+            /**
+             * Sets the number of bi-directional links created for every new element during construction. Reasonable range
+             * for m is 2-100. Higher m work better on datasets with high intrinsic dimensionality and/or high recall,
+             * while low m work better for datasets with low intrinsic dimensionality and/or low recalls. The parameter
+             * also determines the algorithm's memory consumption.
+             * As an example for d = 4 random vectors optimal m for search is somewhere around 6, while for high dimensional
+             * datasets (word embeddings, good face descriptors), higher M are required (e.g. m = 48, 64) for optimal
+             * performance at high recall. The range mM = 12-48 is ok for the most of the use cases. When m is changed one
+             * has to update the other parameters. Nonetheless, ef and efConstruction parameters can be roughly estimated by
+             * assuming that m  efConstruction is a constant.
+             *
+             * @param m the number of bi-directional links created for every new element during construction
+             * @return the builder.
+             */
+            public TBuilder withM(int m) {
+                this.m = m;
+                return self();
+            }
+
+            /**
+             * `
+             * The parameter has the same meaning as ef, but controls the index time / index precision. Bigger efConstruction
+             * leads to longer construction, but better index quality. At some point, increasing efConstruction does not
+             * improve the quality of the index. One way to check if the selection of ef_construction was ok is to measure
+             * a recall for M nearest neighbor search when ef = efConstruction: if the recall is lower than 0.9, then
+             * there is room for improvement.
+             *
+             * @param efConstruction controls the index time / index precision
+             * @return the builder
+             */
+            public TBuilder withEfConstruction(int efConstruction) {
+                this.efConstruction = efConstruction;
+                return self();
+            }
+
+            /**
+             * The size of the dynamic list for the nearest neighbors (used during the search). Higher ef leads to more
+             * accurate but slower search. The value ef of can be anything between k and the size of the dataset.
+             *
+             * @param ef size of the dynamic list for the nearest neighbors
+             * @return the builder
+             */
+            public TBuilder withEf(int ef) {
+                this.ef = ef;
+                return self();
+            }
+
+            /**
+             * Call to enable support for the experimental remove operation. Indices that support removes will consume more
+             * memory.
+             *
+             * @return the builder
+             */
+            public TBuilder withRemoveEnabled() {
+                this.removeEnabled = true;
+                return self();
+            }
         }
 
-        static <Distance> Distance maxValue() {
-            return null;
+
+        /**
+         * Builder for initializing an {@link HnswIndex} instance.
+         *
+         * @param <TVector>  Type of the vector to perform distance calculation on
+         * @param <Distance> Type of distance between items (expect any numeric type: float, double, int, ..)
+         */
+        public static class Builder<TVector, Distance> extends BuilderBase<Builder<TVector, Distance>, TVector, Distance> {
+
+            /**
+             * Constructs a new {@link Builder} instance.
+             *
+             * @param dimensions       the dimensionality of the vectors stored in the index
+             * @param distanceFunction the distance function
+             * @param maxItemCount     the maximum number of elements in the index
+             */
+            Builder(int dimensions, DistanceFunction<TVector, Distance> distanceFunction, Comparator<Distance> distanceComparator, int maxItemCount) {
+
+                super(dimensions, distanceFunction, distanceComparator, maxItemCount);
+            }
+
+            @Override
+            Builder<TVector, Distance> self() {
+                return this;
+            }
+
+            /**
+             * Register the serializers used when saving the index.
+             *
+             * @param itemIdSerializer serializes the key of the item
+             * @param itemSerializer   serializes the
+             * @param <TId>            Type of the external identifier of an item
+             * @param <TItem>          implementation of the Item interface
+             * @return the builder
+             */
+            public <TId, TItem extends knn.Item<TId, TVector>> RefinedBuilder<TId, TVector, TItem, Distance>
+            withCustomSerializers(ObjectSerializer<TId> itemIdSerializer, ObjectSerializer<TItem> itemSerializer) {
+                return new RefinedBuilder<>(dimensions, distanceFunction, distanceComparator, maxItemCount, m, ef,
+                        efConstruction, removeEnabled, itemIdSerializer, itemSerializer);
+            }
+
+            /**
+             * Build the index that uses java object serializers to store the items when reading and writing the index.
+             *
+             * @param <TId>   Type of the external identifier of an item
+             * @param <TItem> implementation of the Item interface
+             * @return the hnsw index instance
+             */
+            public <TId, TItem extends knn.Item<TId, TVector>> HnswIndex<TId, TVector, TItem, Distance> build() {
+                ObjectSerializer<TId> itemIdSerializer = new JavaObjectSerializer<>();
+                ObjectSerializer<TItem> itemSerializer = new JavaObjectSerializer<>();
+
+                return withCustomSerializers(itemIdSerializer, itemSerializer).build();
+            }
+
         }
+
+        /**
+         * Extension of {@link Builder} that has knows what type of item is going to be stored in the index.
+         *
+         * @param <TId>      Type of the external identifier of an item
+         * @param <TVector>  Type of the vector to perform distance calculation on
+         * @param <TItem>    Type of items stored in the index
+         * @param <Distance> Type of distance between items (expect any numeric type: float, double, int, ..)
+         */
+        public static class RefinedBuilder<TId, TVector, TItem extends knn.Item<TId, TVector>, Distance> extends
+                BuilderBase<RefinedBuilder<TId, TVector, TItem, Distance>, TVector, Distance> {
+
+            private ObjectSerializer<TId> itemIdSerializer;
+            private ObjectSerializer<TItem> itemSerializer;
+
+            RefinedBuilder(int dimensions, DistanceFunction<TVector, Distance> distanceFunction, Comparator<Distance> distanceComparator, int maxItemCount, int m, int ef, int efConstruction, boolean removeEnabled, ObjectSerializer<TId> itemIdSerializer, ObjectSerializer<TItem> itemSerializer) {
+
+                super(dimensions, distanceFunction, distanceComparator, maxItemCount);
+
+                this.m = m;
+                this.ef = ef;
+                this.efConstruction = efConstruction;
+                this.removeEnabled = removeEnabled;
+
+                this.itemIdSerializer = itemIdSerializer;
+                this.itemSerializer = itemSerializer;
+            }
+
+            @Override
+            RefinedBuilder<TId, TVector, TItem, Distance> self() {
+                return this;
+            }
+
+            /**
+             * Register the serializers used when saving the index.
+             *
+             * @param itemIdSerializer serializes the key of the item
+             * @param itemSerializer   serializes the
+             * @return the builder
+             */
+            public RefinedBuilder<TId, TVector, TItem, Distance> withCustomSerializers(ObjectSerializer<TId> itemIdSerializer, ObjectSerializer<TItem> itemSerializer) {
+
+                this.itemIdSerializer = itemIdSerializer;
+                this.itemSerializer = itemSerializer;
+
+                return this;
+            }
+
+            /**
+             * Build the index.
+             *
+             * @return the hnsw index instance
+             */
+            public HnswIndex<TId, TVector, TItem, Distance> build() {
+                return new HnswIndex<>(this);
+            }
+
+        }
+
     }
-
-    /**
-     * Base class for HNSW index builders.
-     *
-     * @param <TBuilder>  Concrete class that extends from this builder
-     * @param <TVector>   Type of the vector to perform distance calculation on
-     * @param <Distance> Type of items stored in the index
-     */
-    public static abstract class BuilderBase<TBuilder extends BuilderBase<TBuilder, TVector, Distance>, TVector, Distance> {
-
-        public static final int DEFAULT_M = 10;
-        public static final int DEFAULT_EF = 10;
-        public static final int DEFAULT_EF_CONSTRUCTION = 200;
-        public static final boolean DEFAULT_REMOVE_ENABLED = false;
-
-        int dimensions;
-        DistanceFunction<TVector, Distance> distanceFunction;
-        Comparator<Distance> distanceComparator;
-
-        int maxItemCount;
-
-        int m = DEFAULT_M;
-        int ef = DEFAULT_EF;
-        int efConstruction = DEFAULT_EF_CONSTRUCTION;
-        boolean removeEnabled = DEFAULT_REMOVE_ENABLED;
-
-        BuilderBase(int dimensions, DistanceFunction<TVector, Distance> distanceFunction, Comparator<Distance> distanceComparator, int maxItemCount) {
-
-            this.dimensions = dimensions;
-            this.distanceFunction = distanceFunction;
-            this.distanceComparator = distanceComparator;
-            this.maxItemCount = maxItemCount;
-        }
-
-        abstract TBuilder self();
-
-        /**
-         * Sets the number of bi-directional links created for every new element during construction. Reasonable range
-         * for m is 2-100. Higher m work better on datasets with high intrinsic dimensionality and/or high recall,
-         * while low m work better for datasets with low intrinsic dimensionality and/or low recalls. The parameter
-         * also determines the algorithm's memory consumption.
-         * As an example for d = 4 random vectors optimal m for search is somewhere around 6, while for high dimensional
-         * datasets (word embeddings, good face descriptors), higher M are required (e.g. m = 48, 64) for optimal
-         * performance at high recall. The range mM = 12-48 is ok for the most of the use cases. When m is changed one
-         * has to update the other parameters. Nonetheless, ef and efConstruction parameters can be roughly estimated by
-         * assuming that m  efConstruction is a constant.
-         *
-         * @param m the number of bi-directional links created for every new element during construction
-         * @return the builder.
-         */
-        public TBuilder withM(int m) {
-            this.m = m;
-            return self();
-        }
-
-        /**
-         * `
-         * The parameter has the same meaning as ef, but controls the index time / index precision. Bigger efConstruction
-         * leads to longer construction, but better index quality. At some point, increasing efConstruction does not
-         * improve the quality of the index. One way to check if the selection of ef_construction was ok is to measure
-         * a recall for M nearest neighbor search when ef = efConstruction: if the recall is lower than 0.9, then
-         * there is room for improvement.
-         *
-         * @param efConstruction controls the index time / index precision
-         * @return the builder
-         */
-        public TBuilder withEfConstruction(int efConstruction) {
-            this.efConstruction = efConstruction;
-            return self();
-        }
-
-        /**
-         * The size of the dynamic list for the nearest neighbors (used during the search). Higher ef leads to more
-         * accurate but slower search. The value ef of can be anything between k and the size of the dataset.
-         *
-         * @param ef size of the dynamic list for the nearest neighbors
-         * @return the builder
-         */
-        public TBuilder withEf(int ef) {
-            this.ef = ef;
-            return self();
-        }
-
-        /**
-         * Call to enable support for the experimental remove operation. Indices that support removes will consume more
-         * memory.
-         *
-         * @return the builder
-         */
-        public TBuilder withRemoveEnabled() {
-            this.removeEnabled = true;
-            return self();
-        }
-    }
-
-
-    /**
-     * Builder for initializing an {@link HnswIndex} instance.
-     *
-     * @param <TVector>   Type of the vector to perform distance calculation on
-     * @param <Distance> Type of distance between items (expect any numeric type: float, double, int, ..)
-     */
-    public static class Builder<TVector, Distance> extends BuilderBase<Builder<TVector, Distance>, TVector, Distance> {
-
-        /**
-         * Constructs a new {@link Builder} instance.
-         *
-         * @param dimensions       the dimensionality of the vectors stored in the index
-         * @param distanceFunction the distance function
-         * @param maxItemCount     the maximum number of elements in the index
-         */
-        Builder(int dimensions, DistanceFunction<TVector, Distance> distanceFunction, Comparator<Distance> distanceComparator, int maxItemCount) {
-
-            super(dimensions, distanceFunction, distanceComparator, maxItemCount);
-        }
-
-        @Override
-        Builder<TVector, Distance> self() {
-            return this;
-        }
-
-        /**
-         * Register the serializers used when saving the index.
-         *
-         * @param itemIdSerializer serializes the key of the item
-         * @param itemSerializer   serializes the
-         * @param <TId>            Type of the external identifier of an item
-         * @param <TItem>          implementation of the Item interface
-         * @return the builder
-         */
-        public <TId, TItem extends Item<TId, TVector>> RefinedBuilder<TId, TVector, TItem, Distance>
-        withCustomSerializers(ObjectSerializer<TId> itemIdSerializer, ObjectSerializer<TItem> itemSerializer) {
-            return new RefinedBuilder<>(dimensions, distanceFunction, distanceComparator, maxItemCount, m, ef,
-                    efConstruction, removeEnabled, itemIdSerializer, itemSerializer);
-        }
-
-        /**
-         * Build the index that uses java object serializers to store the items when reading and writing the index.
-         *
-         * @param <TId>   Type of the external identifier of an item
-         * @param <TItem> implementation of the Item interface
-         * @return the hnsw index instance
-         */
-        public <TId, TItem extends Item<TId, TVector>> HnswIndex<TId, TVector, TItem, Distance> build() {
-            ObjectSerializer<TId> itemIdSerializer = new JavaObjectSerializer<>();
-            ObjectSerializer<TItem> itemSerializer = new JavaObjectSerializer<>();
-
-            return withCustomSerializers(itemIdSerializer, itemSerializer).build();
-        }
-
-    }
-
-    /**
-     * Extension of {@link Builder} that has knows what type of item is going to be stored in the index.
-     *
-     * @param <TId>       Type of the external identifier of an item
-     * @param <TVector>   Type of the vector to perform distance calculation on
-     * @param <TItem>     Type of items stored in the index
-     * @param <Distance> Type of distance between items (expect any numeric type: float, double, int, ..)
-     */
-    public static class RefinedBuilder<TId, TVector, TItem extends Item<TId, TVector>, Distance> extends
-            BuilderBase<RefinedBuilder<TId, TVector, TItem, Distance>, TVector, Distance> {
-
-        private ObjectSerializer<TId> itemIdSerializer;
-        private ObjectSerializer<TItem> itemSerializer;
-
-        RefinedBuilder(int dimensions, DistanceFunction<TVector, Distance> distanceFunction, Comparator<Distance> distanceComparator, int maxItemCount, int m, int ef, int efConstruction, boolean removeEnabled, ObjectSerializer<TId> itemIdSerializer, ObjectSerializer<TItem> itemSerializer) {
-
-            super(dimensions, distanceFunction, distanceComparator, maxItemCount);
-
-            this.m = m;
-            this.ef = ef;
-            this.efConstruction = efConstruction;
-            this.removeEnabled = removeEnabled;
-
-            this.itemIdSerializer = itemIdSerializer;
-            this.itemSerializer = itemSerializer;
-        }
-
-        @Override
-        RefinedBuilder<TId, TVector, TItem, Distance> self() {
-            return this;
-        }
-
-        /**
-         * Register the serializers used when saving the index.
-         *
-         * @param itemIdSerializer serializes the key of the item
-         * @param itemSerializer   serializes the
-         * @return the builder
-         */
-        public RefinedBuilder<TId, TVector, TItem, Distance> withCustomSerializers(ObjectSerializer<TId> itemIdSerializer, ObjectSerializer<TItem> itemSerializer) {
-
-            this.itemIdSerializer = itemIdSerializer;
-            this.itemSerializer = itemSerializer;
-
-            return this;
-        }
-
-        /**
-         * Build the index.
-         *
-         * @return the hnsw index instance
-         */
-        public HnswIndex<TId, TVector, TItem, Distance> build() {
-            return new HnswIndex<>(this);
-        }
-
-    }
-
-}

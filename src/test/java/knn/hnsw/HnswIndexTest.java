@@ -8,10 +8,7 @@ import smile.read;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.hamcrest.CoreMatchers.*;
@@ -186,46 +183,13 @@ class HnswIndexTest {
     }
 
     @Test
-    void findNeighbors() throws InterruptedException {
-        HnswIndex<String, float[], knn.TestItem, Float> index = (HnswIndex<String, float[], knn.TestItem, Float>) HnswIndex
-                .newBuilder(37, distanceFunction, 64000)
-                .withCustomSerializers(itemIdSerializer, itemSerializer)
-                .withM(m)
-                .withEfConstruction(efConstruction)
-                .withEf(ef)
-                .withRemoveEnabled()
-                .build();
-
-        var dots = read.INSTANCE.csv("src/main/resources/kddcup.http.data_10_percent_corrected", ',', false, '"', '\\', null);
-        AtomicInteger i = new AtomicInteger();
-        dots.stream().forEach(tuple -> {
-            index.add(new TestItem(String.valueOf(i.incrementAndGet()), toFloats(tuple.toArray())));
-        });
-
-        List<SearchResult<TestItem, Float>> nearest = index.findNeighbors("1", 10);
-        List<SearchResult<TestItem, Float>> nearestExact = index.asExactIndex().findNeighbors("1", 10);
-
-        assertThat(nearest, is(nearestExact));
-    }
-
-    private float[] toFloats(double[] doubles) {
-        float[] floats = new float[doubles.length];
-        for (int i = 0; i < doubles.length; i++) {
-            floats[i] = (float) doubles[i];
-        }
-        return floats;
-    }
-
-    @Test
     void findReverseNeighbors() throws InterruptedException {
         index.addAll(Arrays.asList(item1, item2, item3));
 
-        List<SearchResult<TestItem, Float>> nearest = index.findReverseNeighbors(item1.id(), 10);
+        Optional<Set<TestItem>> reverseNeighbors = index.findReverseNeighbors(item1.id());
+        Optional<Set<TestItem>> reverseNeighborsExact = index.asExactIndex().findReverseNeighbors(item1.id());
 
-        assertThat(nearest, is(Arrays.asList(
-                SearchResult.create(item3, 0.06521261f),
-                SearchResult.create(item2, 0.11621308f)
-        )));
+        assertThat(reverseNeighbors, is(reverseNeighborsExact));
     }
 
     @Test

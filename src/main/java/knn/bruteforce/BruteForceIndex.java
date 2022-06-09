@@ -157,8 +157,8 @@ public class BruteForceIndex<TId, TVector, TItem extends Item<TId, TVector>, TDi
     }
 
     @Override
-    public List<SearchResult<TItem, TDistance>> findReverseNearest(TVector tVector, int k) {
-        return null;
+    public Optional<Set<TItem>> findReverseNeighbors(TId tId) {
+        throw new UnsupportedOperationException();
     }
 
     /**

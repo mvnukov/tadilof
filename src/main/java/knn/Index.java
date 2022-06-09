@@ -169,8 +169,6 @@ public interface Index<TId, TVector, TItem extends Item<TId, TVector>, TDistance
      */
     List<SearchResult<TItem, TDistance>> findNearest(TVector vector, int k);
 
-    List<SearchResult<TItem, TDistance>> findReverseNearest(TVector vector, int k);
-
     /**
      * Find the items closest to the item identified by the passed in id. If the id does not match an item an empty
      * list is returned. the element itself is not included in the response.
@@ -186,15 +184,7 @@ public interface Index<TId, TVector, TItem extends Item<TId, TVector>, TDistance
                 .collect(Collectors.toList()))
                 .orElse(Collections.emptyList());
     }
-
-    default List<SearchResult<TItem, TDistance>> findReverseNeighbors(TId id, int k) {
-        return get(id).map(item -> findReverseNearest(item.vector(), k + 1).stream()
-            .filter(result -> !result.item().id().equals(id))
-            .limit(k)
-            .collect(Collectors.toList()))
-            .orElse(Collections.emptyList());
-
-    }
+    public Optional<Set<TItem>> findReverseNeighbors(TId tId);
 
     /**
      * Saves the index to an OutputStream. Saving is not thread safe and you should not modify the index while saving.

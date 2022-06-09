@@ -1,16 +1,21 @@
 package knn.benchmarks;
 
-import knn.*;
+import knn.DistanceFunctions;
+import knn.JavaObjectSerializer;
+import knn.SearchResult;
+import knn.TestItem;
 import knn.hnsw.HnswIndex;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
 import smile.read;
 
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @State(Scope.Benchmark)
-public class KnnBenchmark {
+public class RknnBenchmark {
 
     private static int iteration;
 
@@ -49,8 +54,8 @@ public class KnnBenchmark {
     }
 
     @Benchmark
-    public void findNeighbors(Blackhole bh, KnnBenchmark knn) {
-        List<SearchResult<TestItem, Float>> nearest = knn.index.findNeighbors(String.valueOf(iteration), 10);
+    public void findReverseNeighbors(Blackhole bh, RknnBenchmark knn) {
+        Optional<Set<TestItem>> nearest = knn.index.findReverseNeighbors(String.valueOf(iteration));
         bh.consume(nearest);
     }
 }
