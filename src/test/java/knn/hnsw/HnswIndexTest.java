@@ -3,36 +3,34 @@ package knn.hnsw;
 import knn.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import smile.read;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.hamcrest.CoreMatchers.*;
 import static org.hamcrest.MatcherAssert.assertThat;
 
 class HnswIndexTest {
-    private HnswIndex<String, float[], knn.TestItem, Float> index;
+    private HnswIndex<String, double[], TestItem> index;
 
     private int maxItemCount = 300;
     private int m = 12;
     private int efConstruction = 250;
     private int ef = 10;
     private int dimensions = 2;
-    private DistanceFunction<float[], Float> distanceFunction = DistanceFunctions.FLOAT_MANHATTAN_DISTANCE;
+    private DistanceFunction<double[], Double> distanceFunction = DistanceFunctions.DOUBLE_MANHATTAN_DISTANCE;
     private ObjectSerializer<String> itemIdSerializer = new JavaObjectSerializer<>();
     private ObjectSerializer<TestItem> itemSerializer = new JavaObjectSerializer<>();
 
-    private TestItem item1 = new TestItem("1", new float[]{0.0110f, 0.2341f}, 10);
-    private TestItem item2 = new TestItem("2", new float[]{0.2300f, 0.3891f}, 10);
-    private TestItem item3 = new TestItem("3", new float[]{0.4300f, 0.9891f}, 10);
+    private TestItem item1 = new TestItem("1", new double[]{0.0110f, 0.2341f}, 10);
+    private TestItem item2 = new TestItem("2", new double[]{0.2300f, 0.3891f}, 10);
+    private TestItem item3 = new TestItem("3", new double[]{0.4300f, 0.9891f}, 10);
 
     @BeforeEach
     void setUp() {
-        HnswIndex<String, float[], knn.TestItem, Float> build = (HnswIndex<String, float[], knn.TestItem, Float>) HnswIndex
+        HnswIndex<String, double[], TestItem> build = (HnswIndex<String, double[], TestItem>) HnswIndex
                 .newBuilder(dimensions, distanceFunction, maxItemCount)
                 .withCustomSerializers(itemIdSerializer, itemSerializer)
                 .withM(m)
@@ -93,35 +91,35 @@ class HnswIndexTest {
     @Test
     void returnsSize() {
         assertThat(index.size(), is(0));
-        index.add(item1);
+        index.add2(item1);
         assertThat(index.size(), is(1));
     }
 
     @Test
     void addAndGet() {
         assertThat(index.get(item1.id()), is(Optional.empty()));
-        index.add(item1);
+        index.add2(item1);
         assertThat(index.get(item1.id()), is(Optional.of(item1)));
     }
 
     @Test
     void addAndContains() {
         assertThat(index.contains(item1.id()), is(false));
-        index.add(item1);
+        index.add2(item1);
         assertThat(index.contains(item1.id()), is(true));
     }
 
     @Test
     void returnsItems() {
         assertThat(index.items().isEmpty(), is(true));
-        index.add(item1);
+        index.add2(item1);
         assertThat(index.items().size(), is(1));
         assertThat(index.items(), hasItems(item1));
     }
 
     @Test
     void removeItem() {
-        index.add(item1);
+        index.add2(item1);
 
         assertThat(index.remove(item1.id(), item1.version()), is(true));
 
@@ -136,10 +134,10 @@ class HnswIndexTest {
 
     @Test
     void addNewerItem() {
-        TestItem newerItem = new TestItem(item1.id(), new float[]{0.f, 0.f}, item1.version() + 1);
+        TestItem newerItem = new TestItem(item1.id(), new double[]{0.f, 0.f}, item1.version() + 1);
 
-        index.add(item1);
-        index.add(newerItem);
+        index.add2(item1);
+        index.add2(newerItem);
 
         assertThat(index.size(), is(1));
         assertThat(index.get(item1.id()), is(Optional.of(newerItem)));
@@ -147,10 +145,10 @@ class HnswIndexTest {
 
     @Test
     void addOlderItem() {
-        TestItem olderItem = new TestItem(item1.id(), new float[]{0.f, 0.f}, item1.version() - 1);
+        TestItem olderItem = new TestItem(item1.id(), new double[]{0.f, 0.f}, item1.version() - 1);
 
-        index.add(item1);
-        index.add(olderItem);
+        index.add2(item1);
+        index.add2(olderItem);
 
         assertThat(index.size(), is(1));
         assertThat(index.get(item1.id()), is(Optional.of(item1)));
@@ -163,7 +161,7 @@ class HnswIndexTest {
 
     @Test
     void removeWithOldVersionIgnored() {
-        index.add(item1);
+        index.add2(item1);
 
         assertThat(index.remove(item1.id(), item1.version() - 1), is(false));
         assertThat(index.size(), is(1));
@@ -173,12 +171,12 @@ class HnswIndexTest {
     void findNearest() throws InterruptedException {
         index.addAll(Arrays.asList(item1, item2, item3));
 
-        List<SearchResult<TestItem, Float>> nearest = index.findNearest(item1.vector(), 10);
+        List<SearchResult<TestItem>> nearest = index.findNearest(item1.vector(), 10);
 
         assertThat(nearest, is(Arrays.asList(
-                SearchResult.create(item1, 0f),
-                SearchResult.create(item3, 0.06521261f),
-                SearchResult.create(item2, 0.11621308f)
+                SearchResult.create(item1, 0d),
+                SearchResult.create(item3, 0.06521261d),
+                SearchResult.create(item2, 0.11621308d)
         )));
     }
 
@@ -209,11 +207,11 @@ class HnswIndexTest {
     void saveAndLoadIndex() throws IOException {
         ByteArrayOutputStream in = new ByteArrayOutputStream();
 
-        index.add(item1);
+        index.add2(item1);
 
         index.save(in);
 
-        HnswIndex<String, float[], TestItem, Float> loadedIndex =
+        HnswIndex<String, double[], TestItem> loadedIndex =
                 HnswIndex.load(new ByteArrayInputStream(in.toByteArray()));
 
         assertThat(loadedIndex.size(), is(1));

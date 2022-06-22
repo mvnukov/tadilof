@@ -1,5 +1,6 @@
 package knn.benchmarks;
 
+import org.openjdk.jmh.results.format.ResultFormatType;
 import org.openjdk.jmh.runner.RunnerException;
 import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
@@ -16,6 +17,11 @@ public class RunBenchmarks {
                         .include(IndexBenchmark.class.getSimpleName())
                         .mode(org.openjdk.jmh.annotations.Mode.All)
                         .timeUnit(TimeUnit.SECONDS)
+                        .addProfiler("gc")
+                        .addProfiler("stack")
+                        .addProfiler("cl")
+                        .addProfiler("jfr")
+                        .resultFormat(ResultFormatType.JSON)
                         .forks(5)
                         .verbosity(VerboseMode.EXTRA)
                         .build();

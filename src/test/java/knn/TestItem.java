@@ -2,19 +2,19 @@ package knn;
 
 import java.util.Arrays;
 
-public class TestItem implements Item<String, float[]> {
+public class TestItem implements Item<String, double[]> {
 
     private static final long serialVersionUID = 1L;
 
     private final String id;
-    private final float[] vector;
+    private final double[] vector;
     private final long version;
 
-    public TestItem(String id, float[] vector) {
+    public TestItem(String id, double[] vector) {
         this(id, vector, 0);
     }
 
-    public TestItem(String id, float[] vector, long version) {
+    public TestItem(String id, double[] vector, long version) {
         this.id = id;
         this.vector = vector;
         this.version = version;
@@ -26,7 +26,7 @@ public class TestItem implements Item<String, float[]> {
     }
 
     @Override
-    public float[] vector() {
+    public double[] vector() {
         return vector;
     }
 

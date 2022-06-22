@@ -7,20 +7,20 @@ import java.util.Comparator;
 
 @ToString(exclude = "distanceComparator")
 @Log
-public class NodeIdAndDistance<Distance> implements Comparable<NodeIdAndDistance<Distance>> {
+public class NodeIdAndDistance implements Comparable<NodeIdAndDistance> {
 
     final int nodeId;
-    final Distance distance;
-    final Comparator<Distance> distanceComparator;
+    final Double distance;
+    final Comparator<Double> distanceComparator;
 
-    NodeIdAndDistance(int nodeId, Distance distance, Comparator<Distance> distanceComparator) {
+    NodeIdAndDistance(int nodeId, Double distance, Comparator<Double> distanceComparator) {
         this.nodeId = nodeId;
         this.distance = distance;
         this.distanceComparator = distanceComparator;
     }
 
     @Override
-    public int compareTo(NodeIdAndDistance<Distance> o) {
+    public int compareTo(NodeIdAndDistance o) {
         return distanceComparator.compare(distance, o.distance);
     }
 }

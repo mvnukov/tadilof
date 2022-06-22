@@ -14,7 +14,7 @@ public class KnnBenchmark {
 
     private static int iteration;
 
-    private HnswIndex<String, float[], TestItem, Float> index;
+    private HnswIndex<String, double[], TestItem> index;
 
     @Setup(Level.Invocation)
     public void iteration() {
@@ -24,7 +24,7 @@ public class KnnBenchmark {
     @Setup(Level.Trial)
     public void buildHnsw() {
         index = HnswIndex
-                .newBuilder(37, DistanceFunctions.FLOAT_COSINE_DISTANCE, 64000)
+                .newBuilder(37, DistanceFunctions.DOUBLE_MANHATTAN_DISTANCE, 64000)
                 .withCustomSerializers(new JavaObjectSerializer<String>(), new JavaObjectSerializer<TestItem>())
                 .withM(12)
                 .withEfConstruction(250)
@@ -35,22 +35,14 @@ public class KnnBenchmark {
         var dots = read.INSTANCE.csv("src/test/resources/kddcup.http.data_10_percent_corrected", ',', false, '"', '\\', null);
         AtomicInteger i = new AtomicInteger();
         dots.stream().forEach(tuple -> {
-            index.add(new TestItem(String.valueOf(i.incrementAndGet()), toFloats(tuple.toArray())));
+            index.add2(new TestItem(String.valueOf(i.incrementAndGet()), tuple.toArray()));
         });
         System.out.println("Built an index");
     }
 
-    private float[] toFloats(double[] doubles) {
-        float[] floats = new float[doubles.length];
-        for (int i = 0; i < doubles.length; i++) {
-            floats[i] = (float) doubles[i];
-        }
-        return floats;
-    }
-
     @Benchmark
     public void findNeighbors(Blackhole bh, KnnBenchmark knn) {
-        List<SearchResult<TestItem, Float>> nearest = knn.index.findNeighbors(String.valueOf(iteration), 10);
+        List<SearchResult<TestItem>> nearest = knn.index.findNeighbors(String.valueOf(iteration), 10);
         bh.consume(nearest);
     }
 }

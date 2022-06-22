@@ -12,23 +12,23 @@ public class IndexBenchmark {
 
     @Param({"20", "40", "100"})
     public int DIMENSIONS = 40;
-    private HnswIndex<String, float[], TestItem, Float> index;
+    private HnswIndex<String, double[], TestItem> index;
     private static long iteration;
     private TestItem testItem;
 
     @Setup(Level.Invocation)
     public void createPoint() {
-        float[] floats = new float[DIMENSIONS];
+        double[] doubles = new double[DIMENSIONS];
         for (int i = 0; i < DIMENSIONS; i++) {
-            floats[i] = random.nextFloat();
+            doubles[i] = random.nextFloat();
         }
-        testItem = new TestItem(String.valueOf(iteration++), floats);
+        testItem = new TestItem(String.valueOf(iteration++), doubles);
     }
 
     @Setup(Level.Trial)
     public void buildHnsw() {
         index = HnswIndex
-                .newBuilder(DIMENSIONS, DistanceFunctions.FLOAT_MANHATTAN_DISTANCE, 64000)
+                .newBuilder(DIMENSIONS, DistanceFunctions.DOUBLE_MANHATTAN_DISTANCE, 640000)
                 .withCustomSerializers(new JavaObjectSerializer<String>(), new JavaObjectSerializer<TestItem>())
                 .withM(12)
                 .withEfConstruction(250)
@@ -47,7 +47,7 @@ public class IndexBenchmark {
 
     @Benchmark
     public void index(IndexBenchmark indexBenchmark) {
-        indexBenchmark.index.add(indexBenchmark.testItem);
+        indexBenchmark.index.add2(indexBenchmark.testItem);
     }
 
 

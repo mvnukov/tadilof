@@ -19,21 +19,21 @@ import java.util.concurrent.ConcurrentHashMap;
  * @param <TId> Type of the external identifier of an item
  * @param <TVector> Type of the vector to perform distance calculation on
  * @param <TItem> Type of items stored in the index
- * @param <TDistance> Type of distance between items (expect any numeric type: float, double, int, ..)
+// * @param <TDistance> Type of distance between items (expect any numeric type: float, double, int, ..)
  */
-public class BruteForceIndex<TId, TVector, TItem extends Item<TId, TVector>, TDistance>
-        implements Index<TId, TVector, TItem, TDistance> {
+public class BruteForceIndex<TId, TVector, TItem extends Item<TId, TVector>>
+        implements Index<TId, TVector, TItem, Double> {
 
     private static final long serialVersionUID = 1L;
 
     private final int dimensions;
-    private final DistanceFunction<TVector, TDistance> distanceFunction;
-    private final Comparator<TDistance> distanceComparator;
+    private final DistanceFunction<TVector, Double> distanceFunction;
+    private final Comparator<Double> distanceComparator;
 
     private final Map<TId, TItem> items;
     private final Map<TId, Long> deletedItemVersions;
 
-    private BruteForceIndex(Builder<TVector, TDistance> builder) {
+    private BruteForceIndex(Builder<TVector> builder) {
         this.dimensions = builder.dimensions;
         this.distanceFunction = builder.distanceFunction;
         this.distanceComparator = builder.distanceComparator;
@@ -124,21 +124,21 @@ public class BruteForceIndex<TId, TVector, TItem extends Item<TId, TVector>, TDi
      * {@inheritDoc}
      */
     @Override
-    public List<SearchResult<TItem, TDistance>> findNearest(TVector vector, int k) {
+    public List<SearchResult<TItem>> findNearest(TVector vector, int k) {
         if (vector == null) {
             throw new IllegalArgumentException("Vector cannot be null.");
         }
 
-        Comparator<SearchResult<TItem, TDistance>> comparator = Comparator
-                .<SearchResult<TItem, TDistance>>naturalOrder()
+        Comparator<SearchResult<TItem>> comparator = Comparator
+                .<SearchResult<TItem>>naturalOrder()
                 .reversed();
 
-        PriorityQueue<SearchResult<TItem, TDistance>> queue = new PriorityQueue<>(k, comparator);
+        PriorityQueue<SearchResult<TItem>> queue = new PriorityQueue<>(k, comparator);
 
         for (TItem item : items.values()) {
-            TDistance distance = distanceFunction.distance(item.vector(), vector);
+            Double distance = distanceFunction.distance(item.vector(), vector);
 
-            SearchResult<TItem, TDistance> searchResult = new SearchResult<>(item, distance, distanceComparator);
+            SearchResult<TItem> searchResult = new SearchResult<>(item, distance, distanceComparator);
             queue.add(searchResult);
 
             if (queue.size() > k) {
@@ -146,9 +146,9 @@ public class BruteForceIndex<TId, TVector, TItem extends Item<TId, TVector>, TDi
             }
         }
 
-        List<SearchResult<TItem, TDistance>> results = new ArrayList<>(queue.size());
+        List<SearchResult<TItem>> results = new ArrayList<>(queue.size());
 
-        SearchResult<TItem, TDistance> result;
+        SearchResult<TItem> result;
         while((result = queue.poll()) != null) { // if you iterate over a priority queue the order is not guaranteed
             results.add(0, result);
         }
@@ -183,7 +183,7 @@ public class BruteForceIndex<TId, TVector, TItem extends Item<TId, TVector>, TDi
      * @return The restored index
      * @throws IOException in case of an I/O exception
      */
-    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> BruteForceIndex<TId, TVector, TItem, TDistance> load(File file) throws IOException {
+    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> BruteForceIndex<TId, TVector, TItem> load(File file) throws IOException {
         return load(new FileInputStream(file));
     }
 
@@ -200,7 +200,7 @@ public class BruteForceIndex<TId, TVector, TItem extends Item<TId, TVector>, TDi
      * @return The restored index
      * @throws IOException in case of an I/O exception
      */
-    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> BruteForceIndex<TId, TVector, TItem, TDistance> load(File file, ClassLoader classLoader) throws IOException {
+    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> BruteForceIndex<TId, TVector, TItem> load(File file, ClassLoader classLoader) throws IOException {
         return load(new FileInputStream(file), classLoader);
     }
 
@@ -216,7 +216,7 @@ public class BruteForceIndex<TId, TVector, TItem extends Item<TId, TVector>, TDi
      * @return The restored index
      * @throws IOException in case of an I/O exception
      */
-    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> BruteForceIndex<TId, TVector, TItem, TDistance> load(Path path) throws IOException {
+    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> BruteForceIndex<TId, TVector, TItem> load(Path path) throws IOException {
         return load(Files.newInputStream(path));
     }
 
@@ -233,7 +233,7 @@ public class BruteForceIndex<TId, TVector, TItem extends Item<TId, TVector>, TDi
      * @return The restored index
      * @throws IOException in case of an I/O exception
      */
-    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> BruteForceIndex<TId, TVector, TItem, TDistance> load(Path path, ClassLoader classLoader) throws IOException {
+    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> BruteForceIndex<TId, TVector, TItem> load(Path path, ClassLoader classLoader) throws IOException {
         return load(Files.newInputStream(path), classLoader);
     }
 
@@ -250,7 +250,7 @@ public class BruteForceIndex<TId, TVector, TItem extends Item<TId, TVector>, TDi
      * @throws IOException in case of an I/O exception
      * @throws IllegalArgumentException in case the file cannot be read
      */
-    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> BruteForceIndex<TId, TVector, TItem, TDistance> load(InputStream inputStream) throws IOException {
+    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> BruteForceIndex<TId, TVector, TItem> load(InputStream inputStream) throws IOException {
         return load(inputStream, Thread.currentThread().getContextClassLoader());
     }
 
@@ -269,10 +269,10 @@ public class BruteForceIndex<TId, TVector, TItem extends Item<TId, TVector>, TDi
      * @throws IllegalArgumentException in case the file cannot be read
      */
     @SuppressWarnings("unchecked")
-    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> BruteForceIndex<TId, TVector, TItem, TDistance> load(InputStream inputStream, ClassLoader classLoader) throws IOException {
+    public static <TId, TVector, TItem extends Item<TId, TVector>, TDistance> BruteForceIndex<TId, TVector, TItem> load(InputStream inputStream, ClassLoader classLoader) throws IOException {
 
         try(ObjectInputStream ois = new ClassLoaderObjectInputStream(classLoader, inputStream)) {
-            return (BruteForceIndex<TId, TVector, TItem, TDistance>) ois.readObject();
+            return (BruteForceIndex<TId, TVector, TItem>) ois.readObject();
         } catch (ClassNotFoundException e) {
             throw new IllegalArgumentException("Could not read input file.", e);
         }
@@ -287,10 +287,10 @@ public class BruteForceIndex<TId, TVector, TItem extends Item<TId, TVector>, TDi
      * @param <TDistance> Type of distance between items (expect any numeric type: float, double, int, ..)
      * @return a builder
      */
-    public static <TVector, TDistance extends Comparable<TDistance>>
-        Builder <TVector, TDistance> newBuilder(int dimensions, DistanceFunction<TVector, TDistance> distanceFunction) {
+    public static <TVector, TDistance extends Comparable<Double>>
+        Builder <TVector> newBuilder(int dimensions, DistanceFunction<TVector, Double> distanceFunction) {
 
-        Comparator<TDistance> distanceComparator = Comparator.naturalOrder();
+        Comparator<Double> distanceComparator = Comparator.naturalOrder();
         return new Builder<>(dimensions, distanceFunction, distanceComparator);
     }
 
@@ -301,10 +301,10 @@ public class BruteForceIndex<TId, TVector, TItem extends Item<TId, TVector>, TDi
      * @param distanceFunction the distance function
      * @param distanceComparator comparator for distances
      * @param <TVector> Type of the vector to perform distance calculation on
-     * @param <TDistance> Type of distance between items (expect any numeric type: float, double, int, ..)
+//     * @param <TDistance> Type of distance between items (expect any numeric type: float, double, int, ..)
      * @return a builder
      */
-    public static <TVector, TDistance> Builder <TVector, TDistance> newBuilder(int dimensions, DistanceFunction<TVector, TDistance> distanceFunction, Comparator<TDistance> distanceComparator) {
+    public static <TVector> Builder <TVector> newBuilder(int dimensions, DistanceFunction<TVector, Double> distanceFunction, Comparator<Double> distanceComparator) {
 
         return new Builder<>(dimensions, distanceFunction, distanceComparator);
     }
@@ -313,17 +313,17 @@ public class BruteForceIndex<TId, TVector, TItem extends Item<TId, TVector>, TDi
      * Builder for initializing an {@link BruteForceIndex} instance.
      *
      * @param <TVector> Type of the vector to perform distance calculation on
-     * @param <TDistance> Type of distance between items (expect any numeric type: float, double, int, ..)
+//     * @param <TDistance> Type of distance between items (expect any numeric type: float, double, int, ..)
      */
-    public static class Builder <TVector, TDistance> {
+    public static class Builder <TVector> {
 
         private final int dimensions;
 
-        private final DistanceFunction<TVector, TDistance> distanceFunction;
+        private final DistanceFunction<TVector, Double> distanceFunction;
 
-        private final Comparator<TDistance> distanceComparator;
+        private final Comparator<Double> distanceComparator;
 
-        Builder(int dimensions, DistanceFunction<TVector, TDistance> distanceFunction, Comparator<TDistance> distanceComparator) {
+        Builder(int dimensions, DistanceFunction<TVector, Double> distanceFunction, Comparator<Double> distanceComparator) {
             this.dimensions = dimensions;
             this.distanceFunction = distanceFunction;
             this.distanceComparator = distanceComparator;
@@ -336,7 +336,7 @@ public class BruteForceIndex<TId, TVector, TItem extends Item<TId, TVector>, TDi
          * @param <TItem> implementation of the Item interface
          * @return the brute force index instance
          */
-        public <TId, TItem extends Item<TId, TVector>> BruteForceIndex<TId, TVector, TItem, TDistance> build() {
+        public <TId, TItem extends Item<TId, TVector>> BruteForceIndex<TId, TVector, TItem> build() {
             return new BruteForceIndex<>(this);
         }
 

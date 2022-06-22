@@ -15,9 +15,9 @@ class ExactView<TId, TVector, TItem extends Item<TId, TVector>, Distance> implem
 
     private static final long serialVersionUID = 1L;
 
-    private final HnswIndex<TId, TVector, TItem, Distance> hnswIndex;
+    private final HnswIndex<TId, TVector, TItem> hnswIndex;
 
-    public ExactView(HnswIndex<TId, TVector, TItem, Distance> hnswIndex) {
+    public ExactView(HnswIndex<TId, TVector, TItem> hnswIndex) {
         this.hnswIndex = hnswIndex;
     }
 
@@ -39,16 +39,16 @@ class ExactView<TId, TVector, TItem extends Item<TId, TVector>, Distance> implem
 
     public Optional<Set<TItem>> findReverseNeighbors(TId tId) {
 
-        Comparator<SearchResult<TItem, Distance>> comparator = Comparator.<SearchResult<TItem, Distance>>naturalOrder().reversed();
+        Comparator<SearchResult<TItem>> comparator = Comparator.<SearchResult<TItem>>naturalOrder().reversed();
 
         Set<TItem> queue = new HashSet<>();
 
         for (int i = 0; i < hnswIndex.nodeCount; i++) {
             Node<TItem> node = hnswIndex.nodes.get(i);
-            if (node == null || node.deleted || node.item.id() == tId) {
+            if (node == null || node.deleted || Objects.equals(node.item.id(), tId)) {
                 continue;
             }
-            List<SearchResult<TItem, Distance>> nearest = findNearest(node.item.vector(), hnswIndex.getEf());
+            List<SearchResult<TItem>> nearest = findNearest(node.item.vector(), hnswIndex.getEf());
 
             if (nearest.stream().anyMatch(sResult -> sResult.item().id().equals(tId))) {
                 queue.add(node.item);
@@ -59,11 +59,11 @@ class ExactView<TId, TVector, TItem extends Item<TId, TVector>, Distance> implem
     }
 
     @Override
-    public List<SearchResult<TItem, Distance>> findNearest(TVector vector, int k) {
+    public List<SearchResult<TItem>> findNearest(TVector vector, int k) {
 
-        Comparator<SearchResult<TItem, Distance>> comparator = Comparator.<SearchResult<TItem, Distance>>naturalOrder().reversed();
+        Comparator<SearchResult<TItem>> comparator = Comparator.<SearchResult<TItem>>naturalOrder().reversed();
 
-        PriorityQueue<SearchResult<TItem, Distance>> queue = new PriorityQueue<>(k, comparator);
+        PriorityQueue<SearchResult<TItem>> queue = new PriorityQueue<>(k, comparator);
 
         for (int i = 0; i < hnswIndex.nodeCount; i++) {
             Node<TItem> node = hnswIndex.nodes.get(i);
@@ -71,9 +71,9 @@ class ExactView<TId, TVector, TItem extends Item<TId, TVector>, Distance> implem
                 continue;
             }
 
-            Distance distance = hnswIndex.distanceFunction.distance(node.item.vector(), vector);
+            Double distance = hnswIndex.distanceFunction.distance(node.item.vector(), vector);
 
-            SearchResult<TItem, Distance> searchResult = new SearchResult<>(node.item, distance, hnswIndex.maxValueDistanceComparator);
+            SearchResult<TItem> searchResult = new SearchResult<>(node.item, distance, hnswIndex.maxValueDistanceComparator);
             queue.add(searchResult);
 
             if (queue.size() > k) {
@@ -81,9 +81,9 @@ class ExactView<TId, TVector, TItem extends Item<TId, TVector>, Distance> implem
             }
         }
 
-        List<SearchResult<TItem, Distance>> results = new ArrayList<>(queue.size());
+        List<SearchResult<TItem>> results = new ArrayList<>(queue.size());
 
-        SearchResult<TItem, Distance> result;
+        SearchResult<TItem> result;
         while ((result = queue.poll()) != null) { // if you iterate over a priority queue the order is not guaranteed
             results.add(0, result);
         }
@@ -92,7 +92,7 @@ class ExactView<TId, TVector, TItem extends Item<TId, TVector>, Distance> implem
     }
 
     @Override
-    public List<SearchResult<TItem, Distance>> findNeighbors(TId tId, int k) {
+    public List<SearchResult<TItem>> findNeighbors(TId tId, int k) {
         return Index.super.findNeighbors(tId, k);
     }
 
