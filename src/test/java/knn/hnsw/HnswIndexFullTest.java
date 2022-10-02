@@ -2,9 +2,6 @@ package knn.hnsw;
 
 import knn.*;
 import org.apache.commons.math3.util.Pair;
-import org.eclipse.collections.impl.factory.Sets;
-import org.eclipse.collections.impl.set.sorted.mutable.TreeSortedSet;
-import org.eclipse.collections.impl.utility.internal.SetIterables;
 import org.graphstream.graph.Graph;
 import org.graphstream.graph.implementations.SingleGraph;
 import org.graphstream.ui.view.Viewer;
@@ -111,7 +108,7 @@ class HnswIndexFullTest {
             ConcurrentSkipListSet<Pair<Node<TestItem>, Double>> knn = testItemNode.getKnn();
             ConcurrentSkipListSet<Pair<Node<TestItem>, Double>> rknn = testItemNode.getRknn();
 
-            System.out.println(testItemNode.id + "/" + testItemNode.item.id() + ": " + Sets.difference(knn, rknn).size());
+            System.out.println(testItemNode.id + "/" + testItemNode.item.id() + ": " + lof(testItemNode));
             org.graphstream.graph.Node visualNode = graph.addNode(String.valueOf(i.getAndIncrement()));
             visualNode.setAttribute("x", tuple.get(0));
             visualNode.setAttribute("y", tuple.get(1));
@@ -136,5 +133,31 @@ class HnswIndexFullTest {
 
 //        assertThat(getIds(reverseNeighbors), is(getIds(reverseNeighborsExact)));
 
+    }
+
+    private double lof(Node<TestItem> node) {
+        ConcurrentSkipListSet<Pair<Node<TestItem>, Double>> knn = node.getKnn();
+        double lrdA = localReachabilityDensity(node);
+        double lrdB = 0;
+        for (Pair<Node<TestItem>, Double> neighbor : knn) {
+            lrdB += localReachabilityDensity(neighbor.getFirst());
+        }
+        return lrdB/(knn.size()*lrdA);
+    }
+
+    private double localReachabilityDensity(Node<TestItem> node) {
+        ConcurrentSkipListSet<Pair<Node<TestItem>, Double>> knn = node.getKnn();
+        double rD = 0;
+        for (Pair<Node<TestItem>, Double> neighbor : knn) {
+            rD = reachabilityDistance(node, neighbor);
+        }
+        return rD/knn.size();
+    }
+
+    private double reachabilityDistance(Node<TestItem> node, Pair<Node<TestItem>, Double> neighbor) {
+        ConcurrentSkipListSet<Pair<Node<TestItem>, Double>> knn = neighbor.getFirst().getKnn();
+        Pair<Node<TestItem>, Double> last = knn.first();
+
+        return Math.max(last.getSecond(), neighbor.getSecond());
     }
 }
